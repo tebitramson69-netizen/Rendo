@@ -1,0 +1,8 @@
+# Secrets never go in Git
+.env
+.env.*
+supabase/.temp/
+supabase/.branches/
+node_modules/
+.DS_Store
+Thumbs.db
