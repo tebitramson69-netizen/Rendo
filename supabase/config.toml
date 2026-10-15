@@ -1,3 +1,6 @@
+project_id = "rendo"
+
+
 # Meta's webhook can't send a Supabase JWT, so JWT verification is off for this function.
 # The function verifies Meta's X-Hub-Signature-256 instead.
 [functions.whatsapp-webhook]
