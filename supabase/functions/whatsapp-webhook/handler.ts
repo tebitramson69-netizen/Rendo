@@ -68,7 +68,14 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       now(),
       MAX_MESSAGE_AGE_SECONDS,
     );
-    for (const s of skipped) console.log(`skip ${s.reason}`, s.wamid ?? "", s.detail ?? "");
+    for (const s of skipped) {
+      // For a phone-number mismatch, also show the last 4 digits of the configured id so a wrong
+      // WHATSAPP_PHONE_NUMBER_ID secret is obvious in the logs (the id is not secret, but keep it short).
+      const hint = s.reason === "wrong_phone_number_id"
+        ? `configured=...${cfg.WHATSAPP_PHONE_NUMBER_ID.slice(-4)}`
+        : "";
+      console.log(`skip ${s.reason}`, s.wamid ?? "", s.detail ?? "", hint);
+    }
     if (statusCount) console.log(`ignored ${statusCount} status update(s)`);
 
     // 4) Answer each new message once. Privacy: log type + id only, never text or phone numbers.

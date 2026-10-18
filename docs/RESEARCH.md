@@ -43,3 +43,19 @@ Facts the booking-loop build depends on, checked against official docs before wr
 - Earlier I said Meta's docs showed no pricing change. **Wrong**: service messages are charged from 1 Oct 2026.
 - Earlier I said Coexistence was "available worldwide" as if Rendo could use it. **Misleading**: it requires Tech Provider status.
 - My Step 0 plan assumed `wa_id` is always present. **Outdated**: since Apr 2026 it can be missing; key on `user_id`.
+
+## M0 go-live debugging (17–18 Oct 2026): why real messages got no reply
+
+Meta's dashboard **Test** button reached the function from day one, but real WhatsApp messages produced no reply. There were three independent causes; all three had to be fixed.
+
+| # | Symptom | Root cause | Fix |
+|---|---|---|---|
+| 1 | No log line at all for real messages | App was in **Development mode** ("some webhooks will not be sent if your app is in Dev mode"). | Added privacy policy URL, data-deletion URL, icon and category, then **Publish** (app is Live since 17 Oct 2026). |
+| 2 | Still no log line after publishing | The WABA (`1767371018729362`) was subscribed only to Meta's own *"WA DevX Webhook Events 1P App"*, not to Rendo. The Test button bypasses this link. | Graph API Explorer, user token with `whatsapp_business_management`: `GET {WABA_ID}/subscribed_apps` to check, `POST {WABA_ID}/subscribed_apps` to subscribe. Rendo now listed. |
+| 3 | Log showed `skip wrong_phone_number_id … 1392005827320537` | The `WHATSAPP_PHONE_NUMBER_ID` secret held a different value (its digest never matched SHA-256 of the real id). | `supabase secrets set WHATSAPP_PHONE_NUMBER_ID=1392005827320537`. The mismatch log now prints `configured=...<last 4>` so this is visible immediately next time. |
+
+Other lessons:
+- Run every `supabase` / `deno` command from the project folder (`cd $HOME\Desktop\rendo`); from elsewhere `deploy` fails with "Entrypoint path does not exist".
+- The **test number** only replies to the (max 5) recipients added in *Step 1. Try it out*; others fail with error `131030`.
+- Messages the function answered with HTTP 200 (including skipped ones) are **not retried** by Meta; send a fresh message after fixing config.
+- A secret's digest in `supabase secrets list` is SHA-256 of the value. Compare it with `sha256(expected)` to verify a secret without revealing it.
