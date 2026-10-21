@@ -166,20 +166,20 @@
         <form id="waitlist-form" novalidate>
           <div class="field">
             <label for="full_name">Your name</label>
-            <input id="full_name" name="full_name" type="text" autocomplete="name" required placeholder="e.g. Tebit Ramson">
+            <input id="full_name" name="full_name" maxlength="100" type="text" autocomplete="name" required placeholder="e.g. Tebit Ramson">
           </div>
           <div class="field">
             <label for="business_name">Business name</label>
-            <input id="business_name" name="business_name" type="text" placeholder="e.g. Bright Smile Dental">
+            <input id="business_name" name="business_name" maxlength="100" type="text" placeholder="e.g. Bright Smile Dental">
           </div>
           <div class="row2">
             <div class="field">
               <label for="whatsapp">WhatsApp number</label>
-              <input id="whatsapp" name="whatsapp" type="tel" inputmode="tel" required placeholder="+237 6XX XX XX XX">
+              <input id="whatsapp" name="whatsapp" maxlength="25" type="tel" inputmode="tel" required placeholder="+237 6XX XX XX XX">
             </div>
             <div class="field">
               <label for="city">City</label>
-              <input id="city" name="city" type="text" placeholder="Douala">
+              <input id="city" name="city" maxlength="60" type="text" placeholder="Douala">
             </div>
           </div>
           <div class="field">
@@ -325,6 +325,16 @@
     };
     if(!data.full_name || !data.whatsapp){
       showStatus('Please add your name and WhatsApp number.', 'err');
+      return;
+    }
+    // Same rules the database enforces (migration 0004), checked here for a friendly message.
+    const digits = data.whatsapp.replace(/[^0-9]/g, '');
+    if(data.full_name.length < 2 || data.full_name.length > 100){
+      showStatus('Please enter your full name (2 to 100 characters).', 'err');
+      return;
+    }
+    if(!/^[+0-9 ().-]{8,25}$/.test(data.whatsapp) || digits.length < 8 || digits.length > 15){
+      showStatus('Please enter a valid WhatsApp number, e.g. +237 6XX XX XX XX.', 'err');
       return;
     }
     btn.disabled = true; btn.textContent = 'Joining…';

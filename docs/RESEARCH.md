@@ -59,3 +59,14 @@ Other lessons:
 - The **test number** only replies to the (max 5) recipients added in *Step 1. Try it out*; others fail with error `131030`.
 - Messages the function answered with HTTP 200 (including skipped ones) are **not retried** by Meta; send a fresh message after fixing config.
 - A secret's digest in `supabase secrets list` is SHA-256 of the value. Compare it with `sha256(expected)` to verify a secret without revealing it.
+
+## M1 schema notes (21 Oct 2026)
+
+- Double booking is prevented in the database by an exclusion constraint (`appointments_no_overlap`, btree_gist,
+  `tstzrange(starts_at, blocked_until) &&`, ignoring cancelled rows). `blocked_until` = end + buffer at booking time.
+- Tested with two concurrent sessions booking the same slot: exactly one row survives. The loser gets either
+  `23P01` (exclusion_violation) or `40P01` (deadlock_detected) when both insert at the same instant. M3 must treat
+  **both** codes as "slot just taken" and offer another slot.
+- Test suite `supabase/tests/m1_schema_test.sql` runs inside a transaction and rolls back (safe on production).
+  Mutation-tested: removing the overlap constraint, the waitlist checks, or the access lock each makes it fail.
+- Waitlist: public key now has INSERT only (Supabase grants ALL by default, and RLS does not cover TRUNCATE).
