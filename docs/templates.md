@@ -65,6 +65,18 @@ webhook as `button.payload` (handled in M4).
 | Buttons | none |
 | Samples | {{1}} `Marie Ngo` · {{2}} `Coupe et brushing` · {{3}} `jeudi 23 octobre à 10h30` · {{4}} `R4821` |
 
+## 4. `rendo_demande_contact` — owner: a client asks to talk to a person (fr)
+
+Sent when a client taps **"Parler à quelqu'un"**. The owner cannot read the bot's chats from his WhatsApp app
+(Cloud API), so he calls or writes to the client from his own phone. Sent at most once per client per 6 hours.
+
+| Part | Content |
+|---|---|
+| Body | `Un client souhaite parler à quelqu'un de votre établissement. Client : {{1}}. Téléphone : {{2}}. Merci de le contacter directement dès que possible. Demande transmise par Rendo.` |
+| Footer | `Rendo · prise de rendez-vous` |
+| Buttons | none |
+| Samples | {{1}} `Marie Ngo` · {{2}} `+237 690 00 00 00` |
+
 ---
 
 ## Status
@@ -76,5 +88,6 @@ webhook as `button.payload` (handled in M4).
 | rendo_rappel_rendez_vous (v2) | en | 22 Oct 2026 | In review |
 | rendo_nouveau_rdv | fr | 22 Oct 2026 | In review |
 | rendo_annulation_rdv | fr | 22 Oct 2026 | In review |
+| rendo_demande_contact | fr | | |
 
 > Language codes our code must send: French = `fr`, English = `en` (plain "English", not en_US / en_GB).

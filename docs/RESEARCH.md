@@ -70,3 +70,21 @@ Other lessons:
 - Test suite `supabase/tests/m1_schema_test.sql` runs inside a transaction and rolls back (safe on production).
   Mutation-tested: removing the overlap constraint, the waitlist checks, or the access lock each makes it fail.
 - Waitlist: public key now has INSERT only (Supabase grants ALL by default, and RLS does not cover TRUNCATE).
+
+## M3 conversation design decisions (22 Oct 2026)
+
+- **Talk to a person.** With the Cloud API the owner cannot see or answer the bot's chats in his WhatsApp app.
+  WhatsApp "coexistence" (app + API on one number) would allow it, but onboarding must go through Meta
+  Embedded Signup via a Tech Provider / Solution Partner, so it is deferred. For now the bot alerts the owner
+  with the utility template `rendo_demande_contact` (client name + number, at most once per client per 6 h),
+  tells the client the business will contact them, and shows the business's optional public `contact_phone`.
+  The owner's private `owner_whatsapp` is never shown. Best practice followed: honour a request for a human
+  immediately (no menus to "earn" it), don't promise a response time, and offer a person automatically after
+  repeated unrecognised messages. `conversations.paused_until` stays reserved for coexistence later.
+- **Cancellation.** A client may cancel their own appointment until it starts; the owner is alerted and the
+  slot reopens. Blocking late cancellations does not make people come, it only turns them into no-shows.
+- **Prices.** Shown in the service list when the business has set one ("Coupe · 30 min · 3 000 FCFA"); a service
+  without a price shows its duration only. Clients in Douala/Yaoundé typically ask the price first; a business
+  that prefers not to publish a price (e.g. a clinic consultation) leaves `price_xaf` empty.
+- **WhatsApp limits used by the flow:** reply buttons ≤ 3, title ≤ 20 chars; list ≤ 10 rows in total,
+  row title ≤ 24, row description ≤ 72, list button ≤ 20, header/footer ≤ 60.
