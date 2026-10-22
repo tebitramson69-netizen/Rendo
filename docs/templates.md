@@ -72,7 +72,9 @@ webhook as `button.payload` (handled in M4).
 | Template | Language | Submitted | Status |
 |---|---|---|---|
 | rendo_rappel_rdv (v1) | fr | 20 Oct 2026 | Rejected — incorrect category |
-| rendo_rappel_rendez_vous | fr | | |
-| rendo_rappel_rendez_vous | en | | |
-| rendo_nouveau_rdv | fr | | |
-| rendo_annulation_rdv | fr | | |
+| rendo_rappel_rendez_vous (v2) | fr | 21 Oct 2026 | Approved (Active) |
+| rendo_rappel_rendez_vous (v2) | en | 22 Oct 2026 | In review |
+| rendo_nouveau_rdv | fr | 22 Oct 2026 | In review |
+| rendo_annulation_rdv | fr | 22 Oct 2026 | In review |
+
+> Language codes our code must send: French = `fr`, English = `en` (plain "English", not en_US / en_GB).
