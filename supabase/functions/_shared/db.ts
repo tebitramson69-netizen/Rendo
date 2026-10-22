@@ -1,9 +1,10 @@
 // Server-side Supabase client. Uses a SECRET key, so it bypasses Row Level Security:
 // it must only ever run inside Edge Functions, never in a browser.
-import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+// Exact version pinned so every deploy runs the same library code (bump it on purpose, after testing).
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.118.0";
 import type { ClaimResult } from "./types.ts";
 
-export type { ClaimResult };
+export type { ClaimResult, SupabaseClient };
 
 function pickSecretKey(): string {
   // New API keys: SUPABASE_SECRET_KEYS is a JSON object of named secret keys.
