@@ -7,7 +7,7 @@ import type { Outbound, OwnerAlert } from "../_shared/outbound.ts";
 import type { ClaimResult } from "../_shared/types.ts";
 import type { Recipient, SendResult } from "../_shared/whatsapp.ts";
 import { createHandler, type HandlerDeps } from "../whatsapp-webhook/handler.ts";
-import { FakeRepo, uuid } from "./fake_repo.ts";
+import { FakeRepo, svc } from "./fake_repo.ts";
 
 const SECRET = "test_app_secret";
 const PHONE_ID = "1392005827320537";
@@ -100,14 +100,7 @@ function fakes(claimResult: ClaimResult | "throw" = "new", business: Business | 
   const repo = new FakeRepo(business ?? BUSINESS);
   if (!business) repo.businessByPhoneNumberId = () => Promise.resolve(null);
   else repo.businessByPhoneNumberId = (id) => Promise.resolve(id === PHONE_ID ? business : null);
-  const coupe = {
-    id: uuid(),
-    businessId: BUSINESS.id,
-    name: "Coupe",
-    durationMinutes: 30,
-    priceXaf: 3000,
-    active: true,
-  };
+  const coupe = svc({ businessId: BUSINESS.id, name: "Coupe", durationMinutes: 30, priceXaf: 3000 });
   repo.services.push(coupe);
   for (const weekday of [1, 2, 3, 4, 5, 6, 7]) repo.hours.push({ weekday, opensAt: "08:00", closesAt: "18:00" });
   const sent: Array<{ to: Recipient; msg: Outbound }> = [];

@@ -21,11 +21,25 @@ export interface Business {
   contactPhone: string | null;
 }
 
-export interface Service {
-  id: string;
+/** fixed: "3 000 FCFA" (or nothing if no price) | from: "dès 15 000 FCFA" | on_site: price confirmed on site */
+export type PriceMode = "fixed" | "from" | "on_site";
+
+/** How a service is named, in both languages (category "" = no category). */
+export interface ServiceLabel {
   name: string;
+  nameEn: string | null;
+  category: string;
+  categoryEn: string | null;
+}
+
+export interface Service extends ServiceLabel {
+  id: string;
   durationMinutes: number;
   priceXaf: number | null;
+  priceMode: PriceMode;
+  /** Short note written by the business, shown before the client confirms ("Mèches non comprises."). */
+  note: string | null;
+  noteEn: string | null;
 }
 
 export interface Client {
@@ -66,7 +80,7 @@ export interface AvailabilityData {
 export interface UpcomingAppointment {
   id: string;
   bookingCode: string;
-  serviceName: string;
+  service: ServiceLabel;
   startsAt: Date;
 }
 

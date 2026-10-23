@@ -9,7 +9,9 @@ import type {
   ContextValue,
   Conversation,
   Lang,
+  PriceMode,
   Service,
+  ServiceLabel,
   UpcomingAppointment,
 } from "./domain.ts";
 
@@ -65,13 +67,31 @@ export function toBusiness(row: Row): Business {
   };
 }
 
+function priceMode(row: Row): PriceMode {
+  const v = row["price_mode"] ?? "fixed";
+  if (v !== "fixed" && v !== "from" && v !== "on_site") throw new Error("row.price_mode: unknown value");
+  return v;
+}
+
+export function toServiceLabel(row: Row): ServiceLabel {
+  return {
+    name: str(row, "name"),
+    nameEn: strOrNull(row, "name_en"),
+    category: strOrNull(row, "category") ?? "",
+    categoryEn: strOrNull(row, "category_en"),
+  };
+}
+
 export function toService(row: Row): Service {
   const price = row["price_xaf"];
   return {
     id: str(row, "id"),
-    name: str(row, "name"),
+    ...toServiceLabel(row),
     durationMinutes: num(row, "duration_minutes"),
     priceXaf: typeof price === "number" ? price : null,
+    priceMode: priceMode(row),
+    note: strOrNull(row, "note"),
+    noteEn: strOrNull(row, "note_en"),
   };
 }
 
@@ -142,7 +162,9 @@ export function toUpcoming(row: Row): UpcomingAppointment {
   return {
     id: str(row, "id"),
     bookingCode: str(row, "booking_code"),
-    serviceName: service && typeof service === "object" ? str(service, "name") : "",
+    service: service && typeof service === "object"
+      ? toServiceLabel(service)
+      : { name: "", nameEn: null, category: "", categoryEn: null },
     startsAt: date(row, "starts_at"),
   };
 }

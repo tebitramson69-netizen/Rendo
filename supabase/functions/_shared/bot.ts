@@ -22,12 +22,17 @@ import type {
   UpcomingAppointment,
 } from "./domain.ts";
 import {
+  categoryTitle,
   dayLabel,
   durationLabel,
   localDateOf,
   longDay,
+  noteOf,
   phoneLabel,
-  priceLabel,
+  priceLong,
+  priceShort,
+  serviceFullName,
+  serviceTitle,
   TEXTS,
   type Texts,
   timeLabel,
@@ -65,6 +70,7 @@ type Screen =
   | "idle"
   | "menu"
   | "services"
+  | "variants"
   | "days"
   | "times"
   | "confirm"
@@ -79,7 +85,7 @@ export function normalize(input: string): string {
     .replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
-type Intent = "lang_fr" | "lang_en" | "menu" | "book" | "mine" | "human" | "unknown";
+type Intent = "lang_fr" | "lang_en" | "menu" | "greet_en" | "thanks" | "book" | "mine" | "human" | "unknown";
 
 const KEYWORDS: Array<[Intent, RegExp]> = [
   ["lang_en", /^(en|english|anglais|in english)$/],
@@ -87,7 +93,13 @@ const KEYWORDS: Array<[Intent, RegExp]> = [
   ["mine", /^(annuler|annule|annulation|cancel|mes rdv|mes rendez vous|my appointments?|mon rdv|mon rendez vous)$/],
   ["human", /^(humain|agent|conseiller|parler a quelqu un|quelqu un|human|person|someone|talk to someone)$/],
   ["book", /^(rdv|rendez vous|prendre rdv|prendre rendez vous|reserver|reservation|book|booking|appointment)$/],
-  ["menu", /^(menu|accueil|start|debut|bonjour|bonsoir|salut|hello|hi|hey|bjr|slt|cc|coucou|good morning)$/],
+  // clearly English greetings: a NEW client writing this gets the bot in English straight away
+  ["greet_en", /^(good morning|good afternoon|good evening|good day|morning|how are you|hello how are you)$/],
+  ["menu", /^(menu|accueil|start|debut|bonjour|bonsoir|salut|hello|hi|hey|bjr|slt|cc|coucou)$/],
+  [
+    "thanks",
+    /^(ok|okay|ok merci|merci|merci beaucoup|thanks|thank you|thank you very much|thx|d accord|daccord|super|parfait|cool)$/,
+  ],
 ];
 
 // Inside a longer sentence, only a few unambiguous words count ("je veux annuler mon rdv").
@@ -115,6 +127,7 @@ const MS = /^\d{12,14}$/;
 type Choice =
   | { kind: "menu" | "book" | "mine" | "human" }
   | { kind: "service"; sid: string }
+  | { kind: "group"; sid: string }
   | { kind: "day"; sid: string; date: string }
   | { kind: "more"; sid: string; date: string; after: number }
   | { kind: "time"; sid: string; start: number }
@@ -128,6 +141,8 @@ export const ids = {
   mine: "m:mine",
   human: "m:human",
   service: (sid: string) => `s:${sid}`,
+  /** A category, identified by one of its services (always re-read fresh). */
+  group: (sid: string) => `g:${sid}`,
   day: (sid: string, date: string) => `d:${sid}:${date}`,
   more: (sid: string, date: string, after: number) => `t+:${sid}:${date}:${after}`,
   time: (sid: string, start: number) => `t:${sid}:${start}`,
@@ -147,7 +162,8 @@ export function parseChoice(id: string): Choice {
       }
       break;
     case "s":
-      if (p.length === 2 && uuid(p[1])) return { kind: "service", sid: p[1] };
+    case "g":
+      if (p.length === 2 && uuid(p[1])) return { kind: p[0] === "s" ? "service" : "group", sid: p[1] };
       break;
     case "d":
       if (p.length === 3 && uuid(p[1]) && DATE.test(p[2])) return { kind: "day", sid: p[1], date: p[2] };
@@ -242,18 +258,57 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     });
   };
 
+  /** "30 min · dès 15 000 FCFA" */
+  const serviceDesc = (sv: Service) =>
+    [durationLabel(sv.durationMinutes, lang), priceShort(sv, lang)].filter(Boolean).join(" · ");
+
+  /**
+   * First list: services without a category, plus one row per category (or the service itself when
+   * a category has a single option). Order follows the business's sort order.
+   */
   const services = async (prefix?: string) => {
     const all = await repo.activeServices(business.id);
     if (all.length === 0) return menuButtons(t().noServices(business.name), { id: ids.human, title: t().btnHuman });
-    const rows: ListRow[] = all.slice(0, 10).map((s) => ({
-      id: ids.service(s.id),
-      title: s.name,
-      description: [durationLabel(s.durationMinutes, lang), s.priceXaf !== null ? priceLabel(s.priceXaf, lang) : null]
-        .filter(Boolean).join(" · "),
-    }));
+    const groups = new Map<string, Service[]>(); // "" key never used: uncategorised services get their own key
+    for (const sv of all) {
+      const key = sv.category ? `c:${sv.category}` : `s:${sv.id}`;
+      groups.set(key, [...(groups.get(key) ?? []), sv]);
+    }
+    const rows: ListRow[] = [...groups.values()].slice(0, 10).map((g) => {
+      if (g.length === 1) {
+        return { id: ids.service(g[0].id), title: serviceFullName(g[0], lang), description: serviceDesc(g[0]) };
+      }
+      const prices = g.filter((x) => x.priceMode !== "on_site" && x.priceXaf !== null).map((x) => x.priceXaf!);
+      const from = prices.length
+        ? priceShort({ ...g[0], priceMode: "from", priceXaf: Math.min(...prices) }, lang)
+        : null;
+      return {
+        id: ids.group(g[0].id),
+        title: categoryTitle(g[0], lang),
+        description: [t().variantsCount(g.length), from].filter(Boolean).join(" · "),
+      };
+    });
     const body = (prefix ? prefix + "\n\n" : "") + t().chooseService(business.name);
     replies.push(list(body, t().listButtonServices, t().sectionServices, rows));
     go("services");
+  };
+
+  /** Second list: the options (variants) of one category, each with its own duration and price. */
+  const variants = async (anyOfGroup: Service) => {
+    const all = (await repo.activeServices(business.id)).filter((x) => x.category === anyOfGroup.category);
+    if (!anyOfGroup.category || all.length <= 1) return all.length ? days(all[0]) : services(t().serviceUnavailable);
+    const rows: ListRow[] = all.slice(0, 10).map((x) => ({
+      id: ids.service(x.id),
+      title: serviceTitle(x, lang),
+      description: serviceDesc(x),
+    }));
+    replies.push(list(
+      t().chooseVariant(categoryTitle(anyOfGroup, lang)),
+      t().listButtonVariants,
+      t().sectionVariants,
+      rows,
+    ));
+    go("variants", { sid: anyOfGroup.id });
   };
 
   const days = async (service: Service, prefix?: string) => {
@@ -261,7 +316,10 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     const byDay = new Map<string, number>();
     for (const s of slots) byDay.set(s.localDate, (byDay.get(s.localDate) ?? 0) + 1);
     if (byDay.size === 0) {
-      return menuButtons(t().noDays(service.name, business.horizonDays), { id: ids.human, title: t().btnHuman });
+      return menuButtons(t().noDays(serviceFullName(service, lang), business.horizonDays), {
+        id: ids.human,
+        title: t().btnHuman,
+      });
     }
     const today = localDateOf(now, tz);
     const rows: ListRow[] = [...byDay].slice(0, 10).map(([date, n]) => ({
@@ -269,7 +327,7 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
       title: dayLabel(date, today, lang),
       description: t().freeSlots(n),
     }));
-    const body = (prefix ? prefix + "\n\n" : "") + t().chooseDay(service.name);
+    const body = (prefix ? prefix + "\n\n" : "") + t().chooseDay(serviceFullName(service, lang));
     replies.push(list(body, t().listButtonDays, t().sectionDays, rows));
     go("days", { sid: service.id });
   };
@@ -296,7 +354,7 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
       });
     }
     const body = (prefix ? prefix + "\n\n" : "") +
-      t().chooseTime(service.name, dayLabel(date, localDateOf(now, tz), lang));
+      t().chooseTime(serviceFullName(service, lang), dayLabel(date, localDateOf(now, tz), lang));
     replies.push(list(body, t().listButtonTimes, t().sectionTimes, rows));
     go("times", { sid: service.id, date, after });
   };
@@ -309,11 +367,12 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     const slot = await stillFree(service, start);
     if (!slot) return times(service, localDateOf(new Date(start), tz), null, t().slotGone);
     const body = t().confirmQuestion(
-      service.name,
+      serviceFullName(service, lang),
       whenLabel(slot.start, tz, lang),
       durationLabel(service.durationMinutes, lang),
       business.name,
-      service.priceXaf !== null ? priceLabel(service.priceXaf, lang) : null,
+      priceLong(service, lang),
+      noteOf(service, lang),
     );
     replies.push(buttons(body, [
       { id: ids.confirm(service.id, start), title: t().btnConfirm },
@@ -332,14 +391,21 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     if (result.status === "slot_taken") return times(service, date, null, t().slotTaken);
     if (result.status === "invalid") return menu(false, [t().bookingFailed]);
     replies.push(
-      text(t().booked(service.name, whenLabel(result.startsAt, tz, lang), business.name, result.bookingCode)),
+      text(
+        t().booked(
+          serviceFullName(service, lang),
+          whenLabel(result.startsAt, tz, lang),
+          business.name,
+          result.bookingCode,
+        ),
+      ),
     );
     alerts.push({
       template: "rendo_nouveau_rdv",
       language: "fr",
       params: [
         clientName,
-        templateParam(service.name),
+        templateParam(serviceFullName(service, "fr")),
         templateParam(whenLabel(result.startsAt, tz, "fr")),
         client.phone ? phoneLabel(client.phone) : "non communiqué",
         result.bookingCode,
@@ -355,7 +421,7 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     const rows: ListRow[] = upcoming.slice(0, 10).map((a) => ({
       id: ids.appointment(a.id),
       title: `${dayLabel(localDateOf(a.startsAt, tz), today, lang)} · ${timeLabel(a.startsAt, tz, lang)}`,
-      description: `${a.serviceName} · ${a.bookingCode}`,
+      description: `${serviceFullName(a.service, lang)} · ${a.bookingCode}`,
     }));
     replies.push(list(t().chooseAppointment, t().listButtonAppointments, t().sectionAppointments, rows));
     go("appointments");
@@ -367,10 +433,12 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
   const appointment = async (aid: string) => {
     const a = await ownUpcoming(aid);
     if (!a) return menu(false, [t().cancelNotFound]);
-    replies.push(buttons(t().appointmentDetail(a.serviceName, whenLabel(a.startsAt, tz, lang), a.bookingCode), [
-      { id: ids.cancel(a.id), title: t().btnCancelAppointment },
-      { id: ids.keep(a.id), title: t().btnKeep },
-    ]));
+    replies.push(
+      buttons(t().appointmentDetail(serviceFullName(a.service, lang), whenLabel(a.startsAt, tz, lang), a.bookingCode), [
+        { id: ids.cancel(a.id), title: t().btnCancelAppointment },
+        { id: ids.keep(a.id), title: t().btnKeep },
+      ]),
+    );
     go("appointment", { aid });
   };
 
@@ -379,13 +447,13 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     if (!a || (await repo.cancelByClient(aid, client.id, now)) !== "cancelled") {
       return menu(false, [t().cancelNotFound]);
     }
-    replies.push(text(t().cancelled(a.serviceName, whenLabel(a.startsAt, tz, lang))));
+    replies.push(text(t().cancelled(serviceFullName(a.service, lang), whenLabel(a.startsAt, tz, lang))));
     alerts.push({
       template: "rendo_annulation_rdv",
       language: "fr",
       params: [
         clientName,
-        templateParam(a.serviceName),
+        templateParam(serviceFullName(a.service, "fr")),
         templateParam(whenLabel(a.startsAt, tz, "fr")),
         a.bookingCode,
       ],
@@ -432,6 +500,8 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     switch (conv.state as Screen) {
       case "services":
         return services();
+      case "variants":
+        return service ? variants(service) : services();
       case "days":
         return service ? days(service) : services();
       case "times":
@@ -458,7 +528,19 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     if (intent === "lang_fr") await setLanguage("fr");
     else if (intent === "lang_en") await setLanguage("en");
     else if (intent === "menu") menu(true);
-    else if (intent === "book") await services();
+    else if (intent === "greet_en") {
+      if (conv.isNew && lang !== "en") {
+        await repo.setClientLanguage(client.id, "en");
+        lang = "en";
+      }
+      menu(true);
+    } else if (intent === "thanks") {
+      if (conv.isNew) menu(true);
+      else {
+        replies.push(text(t().thanksReply));
+        go("idle");
+      }
+    } else if (intent === "book") await services();
     else if (intent === "mine") await myAppointments();
     else if (intent === "human") handoff();
     else if (expired) menu(true); // first message or after a pause: just greet
@@ -484,6 +566,12 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
       case "human":
         handoff();
         break;
+      case "group": {
+        const service = await findService(c.sid);
+        if (!service) await services(t().serviceUnavailable);
+        else await variants(service);
+        break;
+      }
       case "service":
       case "day":
       case "more":

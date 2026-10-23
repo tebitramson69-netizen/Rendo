@@ -1,6 +1,6 @@
 // Rendo M3 — everything the client reads, in French and English, plus date/price/phone formatting.
 // Dates are always shown in the BUSINESS time zone (Africa/Douala for the pilot).
-import type { Lang } from "./domain.ts";
+import type { Lang, Service, ServiceLabel } from "./domain.ts";
 import { localParts } from "./availability.ts";
 
 // ---------------------------------------------------------------------------
@@ -104,6 +104,42 @@ export function phoneLabel(digits: string): string {
   return m ? `+237 ${m[1]} ${m[2]} ${m[3]} ${m[4]}` : `+${digits}`;
 }
 
+/** Variant name in the client's language ("Longues" / "Long"); French if no English name. */
+export function serviceTitle(s: ServiceLabel, lang: Lang): string {
+  return lang === "en" && s.nameEn ? s.nameEn : s.name;
+}
+
+/** Category name in the client's language. */
+export function categoryTitle(s: ServiceLabel, lang: Lang): string {
+  return lang === "en" && s.categoryEn ? s.categoryEn : s.category;
+}
+
+/** "Tresses – Longues" / "Braids – Long", or just the name when there is no category. */
+export function serviceFullName(s: ServiceLabel, lang: Lang): string {
+  return s.category ? `${categoryTitle(s, lang)} – ${serviceTitle(s, lang)}` : serviceTitle(s, lang);
+}
+
+/** Short price for list rows: "3 000 FCFA", "dès 15 000 FCFA", "prix sur place" (null = show nothing). */
+export function priceShort(s: Service, lang: Lang): string | null {
+  if (s.priceMode === "on_site") return lang === "fr" ? "prix sur place" : "price on site";
+  if (s.priceXaf === null) return null;
+  const p = priceLabel(s.priceXaf, lang);
+  return s.priceMode === "from" ? (lang === "fr" ? `dès ${p}` : `from ${p}`) : p;
+}
+
+/** Price line for the summary: "3 000 FCFA", "à partir de 15 000 FCFA", "confirmé sur place". */
+export function priceLong(s: Service, lang: Lang): string | null {
+  if (s.priceMode === "on_site") return lang === "fr" ? "confirmé sur place" : "confirmed on site";
+  if (s.priceXaf === null) return null;
+  const p = priceLabel(s.priceXaf, lang);
+  return s.priceMode === "from" ? (lang === "fr" ? `à partir de ${p}` : `from ${p}`) : p;
+}
+
+/** The business's note in the client's language (French note if no English one). */
+export function noteOf(s: Service, lang: Lang): string | null {
+  return (lang === "en" ? s.noteEn ?? s.note : s.note) || null;
+}
+
 /** Duration "30 min" / "1 h 30" (fr) / "1 h 30 min" (en). */
 export function durationLabel(minutes: number, lang: Lang): string {
   if (minutes < 60) return `${minutes} min`;
@@ -131,6 +167,11 @@ export interface Texts {
   sectionServices: string;
   noServices(business: string): string;
   serviceUnavailable: string;
+  chooseVariant(category: string): string;
+  sectionVariants: string;
+  listButtonVariants: string;
+  variantsCount(n: number): string;
+  thanksReply: string;
   // days
   chooseDay(service: string): string;
   listButtonDays: string;
@@ -146,7 +187,14 @@ export interface Texts {
   laterDesc: string;
   dayFull(day: string): string;
   // confirm
-  confirmQuestion(service: string, when: string, duration: string, business: string, price: string | null): string;
+  confirmQuestion(
+    service: string,
+    when: string,
+    duration: string,
+    business: string,
+    price: string | null,
+    note: string | null,
+  ): string;
   btnConfirm: string;
   btnChangeTime: string;
   btnCancelFlow: string;
@@ -193,6 +241,11 @@ export const TEXTS: Record<Lang, Texts> = {
     sectionServices: "Prestations",
     noServices: (b) => `${b} n'a pas encore de prestation réservable sur WhatsApp.`,
     serviceUnavailable: "Cette prestation n'est plus disponible. Voici la liste à jour :",
+    chooseVariant: (c) => `${c} : quelle option souhaitez-vous ?`,
+    sectionVariants: "Options",
+    listButtonVariants: "Voir les options",
+    variantsCount: (n) => `${n} options`,
+    thanksReply: "Avec plaisir 🙂 Écrivez MENU à tout moment pour revenir au menu.",
     chooseDay: (s) => `${s} : quel jour vous arrange ?`,
     listButtonDays: "Voir les jours",
     sectionDays: "Jours disponibles",
@@ -205,9 +258,9 @@ export const TEXTS: Record<Lang, Texts> = {
     later: "Plus tard…",
     laterDesc: "Voir les heures suivantes",
     dayFull: (d) => `Il n'y a plus de créneau libre ${d}. Choisissez un autre jour :`,
-    confirmQuestion: (s, w, d, b, p) =>
+    confirmQuestion: (s, w, d, b, p, n) =>
       `Récapitulatif :\n• ${s} (${d})\n• ${w}\n• chez ${b}` + (p ? `\n• Prix : ${p}` : "") +
-      "\n\nJe confirme le rendez-vous ?",
+      (n ? `\n\nℹ️ ${n}` : "") + "\n\nJe confirme le rendez-vous ?",
     btnConfirm: "Confirmer",
     btnChangeTime: "Changer l'heure",
     btnCancelFlow: "Annuler",
@@ -249,6 +302,11 @@ export const TEXTS: Record<Lang, Texts> = {
     sectionServices: "Services",
     noServices: (b) => `${b} has no services bookable on WhatsApp yet.`,
     serviceUnavailable: "This service is no longer available. Here is the current list:",
+    chooseVariant: (c) => `${c}: which option would you like?`,
+    sectionVariants: "Options",
+    listButtonVariants: "See options",
+    variantsCount: (n) => `${n} options`,
+    thanksReply: "You're welcome 🙂 Type MENU at any time to see the menu again.",
     chooseDay: (s) => `${s}: which day suits you?`,
     listButtonDays: "See days",
     sectionDays: "Available days",
@@ -261,9 +319,9 @@ export const TEXTS: Record<Lang, Texts> = {
     later: "Later…",
     laterDesc: "See later times",
     dayFull: (d) => `There are no free slots left on ${d}. Please choose another day:`,
-    confirmQuestion: (s, w, d, b, p) =>
+    confirmQuestion: (s, w, d, b, p, n) =>
       `Summary:\n• ${s} (${d})\n• ${w}\n• at ${b}` + (p ? `\n• Price: ${p}` : "") +
-      "\n\nShall I confirm the appointment?",
+      (n ? `\n\nℹ️ ${n}` : "") + "\n\nShall I confirm the appointment?",
     btnConfirm: "Confirm",
     btnChangeTime: "Change time",
     btnCancelFlow: "Cancel",

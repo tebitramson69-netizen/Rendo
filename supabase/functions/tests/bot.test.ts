@@ -3,7 +3,7 @@ import { deepStrictEqual as assertEquals, ok as assert } from "node:assert/stric
 import { type BotEvent, type BotResult, ids, intentOf, parseChoice, runBot, templateParam } from "../_shared/bot.ts";
 import type { Business, Client } from "../_shared/domain.ts";
 import { LIMITS, type Outbound } from "../_shared/outbound.ts";
-import { FakeRepo, uuid } from "./fake_repo.ts";
+import { FakeRepo, svc, uuid } from "./fake_repo.ts";
 
 // Douala local time -> Date (Douala is always UTC+1)
 const at = (local: string) => new Date(local.replace(" ", "T") + ":00+01:00");
@@ -24,30 +24,9 @@ const BUSINESS: Business = {
 
 function setup(business: Business = BUSINESS) {
   const repo = new FakeRepo(business);
-  const coupe = {
-    id: uuid(),
-    businessId: business.id,
-    name: "Coupe",
-    durationMinutes: 30,
-    priceXaf: 3000,
-    active: true,
-  };
-  const tresses = {
-    id: uuid(),
-    businessId: business.id,
-    name: "Tresses",
-    durationMinutes: 120,
-    priceXaf: null,
-    active: true,
-  };
-  const old = {
-    id: uuid(),
-    businessId: business.id,
-    name: "Ancien",
-    durationMinutes: 30,
-    priceXaf: null,
-    active: false,
-  };
+  const coupe = svc({ businessId: business.id, name: "Coupe", durationMinutes: 30, priceXaf: 3000 });
+  const tresses = svc({ businessId: business.id, name: "Tresses", durationMinutes: 120 });
+  const old = svc({ businessId: business.id, name: "Ancien", durationMinutes: 30, active: false });
   repo.services.push(coupe, tresses, old);
   for (const weekday of [1, 2, 3, 4, 5]) {
     repo.hours.push({ weekday, opensAt: "08:00:00", closesAt: "12:00:00" }, {
@@ -331,7 +310,7 @@ Deno.test("bot: an unfinished flow expires after 2 h — next message just greet
   const { repo, coupe } = setup();
   const c = await client(repo);
   await send(repo, c, tap(ids.service(coupe.id)), at("2026-11-01 08:00"));
-  const r = await send(repo, c, say("ok"), at("2026-11-01 10:01"));
+  const r = await send(repo, c, say("oui"), at("2026-11-01 10:01"));
   assertEquals(r.replies.length, 1);
   assert(bodyOf(r.replies[0]).startsWith("Bonjour Marie"));
 });
@@ -348,14 +327,9 @@ Deno.test("bot: no slots at all -> clear message with a way to reach a person", 
 Deno.test("bot: long names never break WhatsApp limits; template params have no line breaks", async () => {
   const long = { ...BUSINESS, name: "Institut de Beauté et Bien-Être des Grandes Dames de Bonapriso" };
   const { repo } = setup(long);
-  repo.services.push({
-    id: uuid(),
-    businessId: long.id,
-    name: "Soin visage complet luxe",
-    durationMinutes: 90,
-    priceXaf: 1250000,
-    active: true,
-  });
+  repo.services.push(
+    svc({ businessId: long.id, name: "Soin visage complet luxe", durationMinutes: 90, priceXaf: 1250000 }),
+  );
   const c = await client(repo, "237690000000", "Marie\nNgo\t\tépouse   Kamga");
   let r = await send(repo, c, tap(ids.book)); // limits checked inside send()
   assert(rowsOf(last(r)).some((x) => x.description === "1 h 30 · 1 250 000 FCFA"));
@@ -374,4 +348,164 @@ Deno.test("bot: keyword recognition ignores case, accents and punctuation", () =
   assertEquals(intentOf("je veux un rdv pour samedi"), "book");
   assertEquals(intentOf("Bonsoir je voudrais une coupe svp"), "unknown");
   assertEquals(intentOf("I want to cancel"), "mine");
+});
+
+// ---------------------------------------------------------------------------
+// M3.5 flexible catalogue
+// ---------------------------------------------------------------------------
+function salon() {
+  const { repo } = setup();
+  repo.services = []; // replace the simple catalogue
+  const b = BUSINESS.id;
+  const coupe = svc({
+    businessId: b,
+    category: "Coiffure",
+    categoryEn: "Hair",
+    name: "Coupe",
+    nameEn: "Haircut",
+    durationMinutes: 30,
+    priceXaf: 3000,
+  });
+  const courtes = svc({
+    businessId: b,
+    category: "Tresses",
+    categoryEn: "Braids",
+    name: "Courtes",
+    nameEn: "Short",
+    durationMinutes: 180,
+    priceXaf: 10000,
+    priceMode: "from",
+    note: "Prix selon le modèle. Apportez vos mèches.",
+    noteEn: "Price depends on the style.",
+  });
+  const longues = svc({
+    businessId: b,
+    category: "Tresses",
+    categoryEn: "Braids",
+    name: "Longues",
+    nameEn: "Long",
+    durationMinutes: 240,
+    priceXaf: 18000,
+    priceMode: "from",
+    note: "Prix selon la longueur.",
+  });
+  const manucure = svc({ businessId: b, name: "Manucure", durationMinutes: 45, priceXaf: 4000 });
+  const conseil = svc({
+    businessId: b,
+    name: "Consultation",
+    nameEn: "Consultation",
+    durationMinutes: 30,
+    priceMode: "on_site",
+  });
+  repo.services.push(coupe, courtes, longues, manucure, conseil);
+  return { repo, coupe, courtes, longues, manucure, conseil };
+}
+
+Deno.test("catalogue: categories first, then variants with their own duration and 'from' price", async () => {
+  const { repo, coupe, courtes, longues } = salon();
+  const c = await client(repo);
+  let r = await send(repo, c, tap(ids.book));
+  // single-option category is shown as the service itself; multi-option category as a group
+  assertEquals(rowsOf(last(r)).map((x) => [x.id, x.title, x.description]), [
+    [ids.service(coupe.id), "Coiffure – Coupe", "30 min · 3 000 FCFA"],
+    [ids.group(courtes.id), "Tresses", "2 options · dès 10 000 FCFA"],
+    [rowsOf(last(r))[2].id, "Manucure", "45 min · 4 000 FCFA"],
+    [rowsOf(last(r))[3].id, "Consultation", "30 min · prix sur place"],
+  ]);
+  r = await send(repo, c, tap(ids.group(courtes.id)));
+  assertEquals(bodyOf(last(r)), "Tresses : quelle option souhaitez-vous ?");
+  assertEquals(rowsOf(last(r)).map((x) => [x.title, x.description]), [
+    ["Courtes", "3 h · dès 10 000 FCFA"],
+    ["Longues", "4 h · dès 18 000 FCFA"],
+  ]);
+  assertEquals(r.conversation.state, "variants");
+
+  // a 4-hour braid only fits a full 4-hour opening range (Mon 08:00-12:00 or 14:00-18:00)
+  r = await send(repo, c, tap(ids.service(longues.id)));
+  assertEquals(bodyOf(last(r)), "Tresses – Longues : quel jour vous arrange ?");
+  r = await send(repo, c, tap(ids.day(longues.id, "2026-11-02")));
+  assertEquals(rowsOf(last(r)).map((x) => [x.title, x.description]), [["8h00", "Fin vers 12h00"], [
+    "14h00",
+    "Fin vers 18h00",
+  ]]);
+
+  // summary: full name, "à partir de" price, and the business's note
+  r = await send(repo, c, tap(ids.time(longues.id, at("2026-11-02 08:00").getTime())));
+  const body = bodyOf(last(r));
+  assert(body.includes("• Tresses – Longues (4 h)"));
+  assert(body.includes("• Prix : à partir de 18 000 FCFA"));
+  assert(body.includes("ℹ️ Prix selon la longueur."));
+
+  // booked: the calendar blocks the real 4 hours, and the owner sees the full French name
+  r = await send(repo, c, tap(ids.confirm(longues.id, at("2026-11-02 08:00").getTime())));
+  assertEquals(repo.appointments[0].end.toISOString(), at("2026-11-02 12:00").toISOString());
+  assertEquals(r.alerts[0].params[1], "Tresses – Longues");
+});
+
+Deno.test("catalogue: clinic-style service with the price confirmed on site", async () => {
+  const { repo, conseil } = salon();
+  const c = await client(repo);
+  const r = await send(repo, c, tap(ids.time(conseil.id, at("2026-11-02 09:00").getTime())));
+  assert(bodyOf(last(r)).includes("• Prix : confirmé sur place"));
+  assert(!bodyOf(last(r)).includes("FCFA"));
+});
+
+Deno.test("catalogue: English client sees English names, categories, prices and notes (French as fallback)", async () => {
+  const { repo, courtes, longues } = salon();
+  const c = await client(repo);
+  await send(repo, c, say("EN"));
+  let r = await send(repo, c, tap(ids.book));
+  assertEquals(rowsOf(last(r)).map((x) => [x.title, x.description]), [
+    ["Hair – Haircut", "30 min · 3,000 FCFA"],
+    ["Braids", "2 options · from 10,000 FCFA"],
+    ["Manucure", "45 min · 4,000 FCFA"], // no English name set: French name kept
+    ["Consultation", "30 min · price on site"],
+  ]);
+  r = await send(repo, c, tap(ids.group(courtes.id)));
+  assertEquals(rowsOf(last(r)).map((x) => x.title), ["Short", "Long"]);
+  r = await send(repo, c, tap(ids.time(courtes.id, at("2026-11-02 08:00").getTime())));
+  assert(bodyOf(last(r)).includes("• Braids – Short (3 h)"));
+  assert(bodyOf(last(r)).includes("• Price: from 10,000 FCFA"));
+  assert(bodyOf(last(r)).includes("ℹ️ Price depends on the style."));
+  r = await send(repo, c, tap(ids.time(longues.id, at("2026-11-03 08:00").getTime())));
+  assert(bodyOf(last(r)).includes("ℹ️ Prix selon la longueur.")); // no English note: French one shown
+});
+
+Deno.test("catalogue: a group tap re-reads the catalogue (deactivated or single option)", async () => {
+  const { repo, courtes, longues } = salon();
+  const c = await client(repo);
+  repo.services.find((x) => x.id === longues.id)!.active = false;
+  const r = await send(repo, c, tap(ids.group(courtes.id))); // only one option left -> straight to the days
+  assertEquals(bodyOf(last(r)), "Tresses – Courtes : quel jour vous arrange ?");
+  repo.services.find((x) => x.id === courtes.id)!.active = false;
+  const r2 = await send(repo, c, tap(ids.group(courtes.id)));
+  assert(bodyOf(last(r2)).startsWith("Cette prestation n'est plus disponible."));
+});
+
+Deno.test("greetings: a new client saying 'Good morning' gets English; 'Hello' stays neutral", async () => {
+  const { repo } = setup();
+  const anglo = await client(repo, "237690000005", "John");
+  let r = await send(repo, anglo, say("GOOD MORNING"));
+  assert(bodyOf(last(r)).startsWith("Hello John 👋 Welcome to Rendo Démo."));
+  assertEquals(repo.languageChanges, [[anglo.id, "en"]]);
+
+  const franco = await client(repo, "237690000006", "Paul");
+  r = await send(repo, franco, say("Hello"));
+  assert(bodyOf(last(r)).startsWith("Bonjour Paul"));
+
+  // an existing French client is not switched by a greeting
+  r = await send(repo, franco, say("good evening"));
+  assert(bodyOf(last(r)).startsWith("Bonjour Paul"));
+  assertEquals(repo.languageChanges.length, 1);
+});
+
+Deno.test("greetings: 'Ok' / 'Merci' after a booking gets a short reply, not the whole menu again", async () => {
+  const { repo, coupe } = setup();
+  const c = await client(repo);
+  await send(repo, c, tap(ids.confirm(coupe.id, at("2026-11-02 09:00").getTime())));
+  const r = await send(repo, c, say("Ok"));
+  assertEquals(r.replies, [{ kind: "text", body: "Avec plaisir 🙂 Écrivez MENU à tout moment pour revenir au menu." }]);
+  const first = await client(repo, "237690000007", "Nouveau");
+  const r2 = await send(repo, first, say("merci"));
+  assert(bodyOf(last(r2)).startsWith("Bonjour Nouveau")); // a brand-new client is greeted
 });

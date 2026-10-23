@@ -88,3 +88,23 @@ Other lessons:
   that prefers not to publish a price (e.g. a clinic consultation) leaves `price_xaf` empty.
 - **WhatsApp limits used by the flow:** reply buttons ≤ 3, title ≤ 20 chars; list ≤ 10 rows in total,
   row title ≤ 24, row description ≤ 72, list button ≤ 20, header/footer ≤ 60.
+
+## M3.5 flexible catalogue (23 Oct 2026)
+
+Feedback from the first live test: service names stayed French for English-speaking clients, and salon/clinic
+prices (and durations) vary by style, length or consultation.
+
+- **Variants with their own duration.** Booksy calls this "service variants" (one service, several versions,
+  each with its own price and duration). Rendo models each variant as a normal service row inside a
+  `category` ("Tresses" → "Courtes" 3 h / "Longues" 4 h), so availability and the no-overlap rule always use
+  the real duration. The bot lists categories first (a category with one option is shown directly), then
+  the options. Long services must fit inside one opening range (a 4 h braid needs a 4 h range).
+- **Price modes:** `fixed` ("3 000 FCFA", or nothing if no price), `from` ("dès 15 000 FCFA" / summary
+  "à partir de …", price required) and `on_site` ("prix sur place" / "confirmé sur place", for clinics).
+- **English:** optional `name_en`, `category_en`, `note_en`; French is the fallback. A NEW client whose first
+  message is a clearly English greeting ("good morning/afternoon/evening") is switched to English;
+  "hello/hi" stay neutral (francophones use them too).
+- **Note** (≤ 150 chars, fr/en), written by the owner, shown in the summary before confirming (e.g. whether hair
+  extensions are included, sold at the salon, or brought by the client). If the price really differs
+  ("mèches du salon" vs "vos mèches"), the owner creates two options instead, each with its own price.
+- "Ok / merci / thanks" now gets a short reply instead of the whole menu again.

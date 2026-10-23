@@ -26,11 +26,31 @@ interface Appt {
   status: "confirmed" | "cancelled";
 }
 
+type FakeService = Service & { businessId: string; active: boolean };
+
+/** A service with the catalogue defaults (no category, fixed price, no English name, no note). */
+export function svc(
+  fields: Partial<FakeService> & Pick<FakeService, "businessId" | "name" | "durationMinutes">,
+): FakeService {
+  return {
+    id: uuid(),
+    nameEn: null,
+    category: "",
+    categoryEn: null,
+    priceXaf: null,
+    priceMode: "fixed",
+    note: null,
+    noteEn: null,
+    active: true,
+    ...fields,
+  };
+}
+
 let counter = 0;
 export const uuid = () => `00000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`;
 
 export class FakeRepo implements Repo {
-  services: Array<Service & { businessId: string; active: boolean }> = [];
+  services: FakeService[] = [];
   hours: OpeningRange[] = [];
   appointments: Appt[] = [];
   clients: Client[] = [];
@@ -49,7 +69,7 @@ export class FakeRepo implements Repo {
   activeServices(businessId: string): Promise<Service[]> {
     return Promise.resolve(
       this.services.filter((s) => s.businessId === businessId && s.active)
-        .map(({ id, name, durationMinutes, priceXaf }) => ({ id, name, durationMinutes, priceXaf })),
+        .map(({ businessId: _b, active: _a, ...service }) => service),
     );
   }
 
@@ -149,7 +169,9 @@ export class FakeRepo implements Repo {
         .map((a) => ({
           id: a.id,
           bookingCode: a.code,
-          serviceName: this.services.find((s) => s.id === a.serviceId)?.name ?? "",
+          service: (({ name, nameEn, category, categoryEn }) => ({ name, nameEn, category, categoryEn }))(
+            this.services.find((s) => s.id === a.serviceId)!,
+          ),
           startsAt: a.start,
         })),
     );

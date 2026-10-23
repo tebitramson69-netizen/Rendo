@@ -35,6 +35,8 @@ function fail(operation: string, error: PgError): never {
 
 const BUSINESS_COLUMNS =
   "id, name, owner_whatsapp, timezone, default_language, slot_minutes, buffer_minutes, booking_horizon_days, min_notice_minutes, contact_phone";
+const SERVICE_COLUMNS =
+  "id, name, name_en, category, category_en, duration_minutes, price_xaf, price_mode, note, note_en";
 const CONVERSATION_COLUMNS =
   "client_id, business_id, state, context, expires_at, paused_until, last_inbound_at, handoff_requested_at, version";
 
@@ -50,7 +52,7 @@ export class SupabaseRepo implements Repo {
 
   async activeServices(businessId: string): Promise<Service[]> {
     const { data, error } = await this.db.from("services")
-      .select("id, name, duration_minutes, price_xaf")
+      .select(SERVICE_COLUMNS)
       .eq("business_id", businessId).eq("active", true)
       .order("sort_order").order("name");
     if (error) fail("activeServices", error);
@@ -145,7 +147,7 @@ export class SupabaseRepo implements Repo {
 
   async upcomingForClient(clientId: string, now: Date): Promise<UpcomingAppointment[]> {
     const { data, error } = await this.db.from("appointments")
-      .select("id, booking_code, starts_at, services(name)")
+      .select("id, booking_code, starts_at, services(name, name_en, category, category_en)")
       .eq("client_id", clientId).eq("status", "confirmed").gt("starts_at", now.toISOString())
       .order("starts_at").limit(10);
     if (error) fail("upcomingForClient", error);

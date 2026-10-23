@@ -142,7 +142,7 @@ Deno.test({
       await t.step("upcoming -> cancel -> slot free again", async () => {
         const up = await repo.upcomingForClient(client.id, now);
         assertEquals(up.length, 1);
-        assertEquals(up[0].serviceName, "Coupe");
+        assertEquals(up[0].service.name, "Coupe");
         const other = await repo.upsertClient(businessId, { waUserId: "BSUID.IT.2" });
         assertEquals(await repo.cancelByClient(up[0].id, other.id, now), "not_found"); // not their appointment
         assertEquals(await repo.cancelByClient(up[0].id, client.id, now), "cancelled");

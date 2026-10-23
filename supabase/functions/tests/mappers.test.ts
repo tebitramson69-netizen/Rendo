@@ -118,6 +118,6 @@ Deno.test("mappers: upcoming appointment with embedded service", () => {
     starts_at: "2026-11-02T08:00:00Z",
     services: { name: "Coupe" },
   });
-  assertEquals(u.serviceName, "Coupe");
+  assertEquals(u.service, { name: "Coupe", nameEn: null, category: "", categoryEn: null });
   assertEquals(u.startsAt.toISOString(), "2026-11-02T08:00:00.000Z");
 });
