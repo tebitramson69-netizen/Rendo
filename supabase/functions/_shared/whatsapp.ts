@@ -1,6 +1,8 @@
 // WhatsApp Cloud API helpers shared by Rendo's Edge Functions.
 // Pure functions (no database, no network) are kept separate so they can be unit-tested.
 
+import type { Outbound, OwnerAlert } from "./outbound.ts";
+
 export const GRAPH_VERSION = "v25.0"; // supported until July 2028; v26.0 is also available
 
 // ---------------------------------------------------------------------------
@@ -44,6 +46,12 @@ export interface InboundMessage {
   type: "text" | "interactive" | "button";
   timestamp: number;
   profileName: string;
+  /** Typed text. Only passed to the bot in memory: never logged, never stored. */
+  text?: string;
+  /** Id of the tapped reply button or list row (ids are set by Rendo, see bot.ts). */
+  choiceId?: string;
+  /** Payload of a template quick-reply button (reminders, M4). */
+  buttonPayload?: string;
 }
 
 export type SkipReason =
@@ -114,6 +122,9 @@ export function extractInbound(
           type: m.type as InboundMessage["type"],
           timestamp: ts,
           profileName: contact?.profile?.name ?? "",
+          text: m.type === "text" ? m.text?.body : undefined,
+          choiceId: m.interactive?.button_reply?.id ?? m.interactive?.list_reply?.id,
+          buttonPayload: m.button?.payload,
         });
       }
     }
@@ -179,17 +190,6 @@ export function firstName(profileName: string): string {
   return first.replace(/[^\p{L}\p{M}'-]/gu, "").slice(0, 30);
 }
 
-/** Temporary M0 reply, replaced by the booking flow in M3. Never echoes the client's text. */
-export function buildWelcome(profileName: string): string {
-  const name = firstName(profileName);
-  const hello = name ? `Bonjour ${name} 👋` : "Bonjour 👋";
-  return (
-    `${hello}\nIci Rendo, l'assistant de rendez-vous. ` +
-    `La prise de rendez-vous sur WhatsApp arrive très bientôt.\n\n` +
-    `Hello! This is Rendo, the booking assistant. WhatsApp booking is coming soon.`
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Sending
 // ---------------------------------------------------------------------------
@@ -210,7 +210,70 @@ export interface SendResult {
   errorCode?: number;
 }
 
-export async function sendText(cfg: SendConfig, to: string, body: string): Promise<SendResult> {
+/** Who to send to: the phone number when WhatsApp gave it, otherwise the business-scoped user id. */
+export type Recipient = { phone: string } | { userId: string };
+
+/** Since mid-2026 Meta accepts "recipient" (BSUID) for users who hide their number; "to" is phone only. */
+export function addressOf(r: Recipient): Record<string, string> {
+  return "phone" in r ? { to: r.phone } : { recipient: r.userId };
+}
+
+/** The message part of a Cloud API request for one bot message. */
+export function outboundContent(msg: Outbound): Record<string, unknown> {
+  switch (msg.kind) {
+    case "text":
+      return { type: "text", text: { preview_url: false, body: msg.body } };
+    case "buttons":
+      return {
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: { text: msg.body },
+          ...(msg.footer ? { footer: { text: msg.footer } } : {}),
+          action: { buttons: msg.buttons.map((b) => ({ type: "reply", reply: { id: b.id, title: b.title } })) },
+        },
+      };
+    case "list":
+      return {
+        type: "interactive",
+        interactive: {
+          type: "list",
+          body: { text: msg.body },
+          ...(msg.footer ? { footer: { text: msg.footer } } : {}),
+          action: {
+            button: msg.button,
+            sections: [{
+              title: msg.sectionTitle,
+              rows: msg.rows.map((r) => ({
+                id: r.id,
+                title: r.title,
+                ...(r.description ? { description: r.description } : {}),
+              })),
+            }],
+          },
+        },
+      };
+  }
+}
+
+/** The message part of a Cloud API request for an approved template (owner alerts). */
+export function templateContent(alert: OwnerAlert): Record<string, unknown> {
+  return {
+    type: "template",
+    template: {
+      name: alert.template,
+      language: { code: alert.language },
+      components: [{ type: "body", parameters: alert.params.map((text) => ({ type: "text", text })) }],
+    },
+  };
+}
+
+/** Sends one message. Never throws; never returns Meta's error text (it can contain phone numbers). */
+export async function sendPayload(
+  cfg: SendConfig,
+  to: Recipient,
+  content: Record<string, unknown>,
+): Promise<SendResult> {
   const doFetch = cfg.fetchFn ?? fetch;
   try {
     const res = await doFetch(
@@ -222,9 +285,8 @@ export async function sendText(cfg: SendConfig, to: string, body: string): Promi
         body: JSON.stringify({
           messaging_product: "whatsapp",
           recipient_type: "individual",
-          to,
-          type: "text",
-          text: { preview_url: false, body },
+          ...addressOf(to),
+          ...content,
         }),
       },
     );
@@ -237,4 +299,16 @@ export async function sendText(cfg: SendConfig, to: string, body: string): Promi
   } catch {
     return { ok: false, status: 0 }; // network error or timeout
   }
+}
+
+export function sendText(cfg: SendConfig, to: string | Recipient, body: string): Promise<SendResult> {
+  return sendPayload(cfg, typeof to === "string" ? { phone: to } : to, outboundContent({ kind: "text", body }));
+}
+
+export function sendOutbound(cfg: SendConfig, to: Recipient, msg: Outbound): Promise<SendResult> {
+  return sendPayload(cfg, to, outboundContent(msg));
+}
+
+export function sendTemplate(cfg: SendConfig, to: Recipient, alert: OwnerAlert): Promise<SendResult> {
+  return sendPayload(cfg, to, templateContent(alert));
 }

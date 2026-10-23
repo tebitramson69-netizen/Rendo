@@ -6,15 +6,49 @@ import { localParts } from "./availability.ts";
 // ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------
-const cache = new Map<string, Intl.DateTimeFormat>();
-function fmt(locale: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
-  const key = locale + JSON.stringify(opts);
-  let f = cache.get(key);
-  if (!f) cache.set(key, f = new Intl.DateTimeFormat(locale, opts));
-  return f;
-}
-const LOCALE: Record<Lang, string> = { fr: "fr-FR", en: "en-GB" };
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+// Day and month names are written out here instead of using Intl locale data: the result is then
+// identical on every machine and runtime (an Edge runtime without French locale data would
+// otherwise silently fall back to English).
+const NAMES = {
+  fr: {
+    days: ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"],
+    daysShort: ["Dim.", "Lun.", "Mar.", "Mer.", "Jeu.", "Ven.", "Sam."],
+    months: [
+      "janvier",
+      "février",
+      "mars",
+      "avril",
+      "mai",
+      "juin",
+      "juillet",
+      "août",
+      "septembre",
+      "octobre",
+      "novembre",
+      "décembre",
+    ],
+    monthsShort: ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."],
+  },
+  en: {
+    days: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+    daysShort: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    months: [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+    ],
+    monthsShort: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+  },
+} as const;
 
 /** A local calendar date "YYYY-MM-DD" as a Date at noon UTC (safe to format with timeZone UTC). */
 function calendarDate(localDate: string): Date {
@@ -33,17 +67,14 @@ export function dayLabel(localDate: string, today: string, lang: Lang): string {
   const diff = Math.round((calendarDate(localDate).getTime() - calendarDate(today).getTime()) / 86_400_000);
   if (diff === 0) return lang === "fr" ? "Aujourd'hui" : "Today";
   if (diff === 1) return lang === "fr" ? "Demain" : "Tomorrow";
-  const parts = fmt(LOCALE[lang], { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" })
-    .formatToParts(calendarDate(localDate));
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  return `${cap(get("weekday"))} ${get("day")} ${get("month")}`;
+  const d = calendarDate(localDate), n = NAMES[lang];
+  return `${n.daysShort[d.getUTCDay()]} ${d.getUTCDate()} ${n.monthsShort[d.getUTCMonth()]}`;
 }
 
 /** "lundi 2 novembre" / "Monday 2 November" for a local date. */
 export function longDay(localDate: string, lang: Lang): string {
-  const s = fmt(LOCALE[lang], { timeZone: "UTC", weekday: "long", day: "numeric", month: "long" })
-    .format(calendarDate(localDate));
-  return lang === "en" ? s.replace(",", "") : s;
+  const d = calendarDate(localDate), n = NAMES[lang];
+  return `${n.days[d.getUTCDay()]} ${d.getUTCDate()} ${n.months[d.getUTCMonth()]}`;
 }
 
 /** "10h30" (fr) / "10:30" (en) in the business time zone. */

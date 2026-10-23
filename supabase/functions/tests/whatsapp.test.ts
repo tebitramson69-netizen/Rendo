@@ -3,10 +3,12 @@
 import { deepStrictEqual as assertEquals, ok as assert } from "node:assert/strict";
 import { readEnv } from "../_shared/env.ts";
 import {
-  buildWelcome,
   extractInbound,
   firstName,
+  outboundContent,
+  sendTemplate,
   sendText,
+  templateContent,
   timingSafeEqual,
   verifyMetaSignature,
   type WebhookMessage,
@@ -146,6 +148,10 @@ Deno.test("extract: accepts interactive and template button replies", () => {
     7200,
   );
   assertEquals(r.accepted.map((m) => m.type), ["interactive", "button"]);
+  assertEquals(r.accepted.map((m) => [m.choiceId, m.buttonPayload, m.text]), [
+    ["BOOK", undefined, undefined],
+    [undefined, "CONFIRM_1", undefined],
+  ]);
 });
 
 Deno.test("extract: status-only payload produces no messages", () => {
@@ -219,11 +225,6 @@ Deno.test("firstName strips symbols and limits length", () => {
   assertEquals(firstName("A".repeat(50)).length, 30);
 });
 
-Deno.test("welcome message never contains the client's text and has a fallback greeting", () => {
-  assert(buildWelcome("Marie Ngo").startsWith("Bonjour Marie 👋"));
-  assert(buildWelcome("").startsWith("Bonjour 👋"));
-});
-
 // ---------------- env ----------------
 Deno.test("readEnv reports missing and blank values", () => {
   const r = readEnv(["A", "B", "C"] as const, (n) => ({ A: "1", B: "  " } as Record<string, string>)[n]);
@@ -269,4 +270,77 @@ Deno.test("sendText: network failure does not throw", async () => {
   const fake = (() => Promise.reject(new Error("offline"))) as unknown as typeof fetch;
   const r = await sendText({ token: "t", phoneNumberId: PHONE_ID, fetchFn: fake }, "x", "hi");
   assertEquals(r, { ok: false, status: 0 });
+});
+
+// ---------------- outgoing message shapes ----------------
+Deno.test("outbound: reply buttons and list match the Cloud API format", () => {
+  assertEquals(
+    outboundContent({
+      kind: "buttons",
+      body: "Que souhaitez-vous faire ?",
+      footer: "Reply EN",
+      buttons: [{ id: "m:book", title: "Prendre rendez-vous" }],
+    }),
+    {
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: "Que souhaitez-vous faire ?" },
+        footer: { text: "Reply EN" },
+        action: { buttons: [{ type: "reply", reply: { id: "m:book", title: "Prendre rendez-vous" } }] },
+      },
+    },
+  );
+  assertEquals(
+    outboundContent({
+      kind: "list",
+      body: "Choisissez",
+      button: "Voir les heures",
+      sectionTitle: "Heures",
+      rows: [{ id: "t:1", title: "8h00", description: "Fin vers 8h30" }, { id: "t:2", title: "8h30" }],
+    }),
+    {
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: "Choisissez" },
+        action: {
+          button: "Voir les heures",
+          sections: [{
+            title: "Heures",
+            rows: [{ id: "t:1", title: "8h00", description: "Fin vers 8h30" }, { id: "t:2", title: "8h30" }],
+          }],
+        },
+      },
+    },
+  );
+});
+
+Deno.test("outbound: template alert with body parameters, sent to the owner", async () => {
+  const alert = { template: "rendo_nouveau_rdv" as const, language: "fr" as const, params: ["Marie", "Coupe"] };
+  assertEquals(templateContent(alert), {
+    type: "template",
+    template: {
+      name: "rendo_nouveau_rdv",
+      language: { code: "fr" },
+      components: [{ type: "body", parameters: [{ type: "text", text: "Marie" }, { type: "text", text: "Coupe" }] }],
+    },
+  });
+  let sent: Record<string, unknown> = {};
+  const fake = ((_url: string, init: RequestInit) => {
+    sent = JSON.parse(init.body as string);
+    return Promise.resolve(new Response(JSON.stringify({ messages: [{ id: "w" }] }), { status: 200 }));
+  }) as unknown as typeof fetch;
+  await sendTemplate({ token: "t", phoneNumberId: PHONE_ID, fetchFn: fake }, { phone: "237690000099" }, alert);
+  assertEquals([sent.messaging_product, sent.to, sent.type], ["whatsapp", "237690000099", "template"]);
+});
+
+Deno.test("outbound: users who hide their number are addressed by user id ('recipient', not 'to')", async () => {
+  let sent: Record<string, unknown> = {};
+  const fake = ((_url: string, init: RequestInit) => {
+    sent = JSON.parse(init.body as string);
+    return Promise.resolve(new Response("{}", { status: 200 }));
+  }) as unknown as typeof fetch;
+  await sendText({ token: "t", phoneNumberId: PHONE_ID, fetchFn: fake }, { userId: "CM.123456" }, "hi");
+  assertEquals([sent.recipient, "to" in sent], ["CM.123456", false]);
 });

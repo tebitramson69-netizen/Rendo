@@ -10,6 +10,8 @@ import { adminClient } from "../_shared/db.ts";
 import { SupabaseRepo } from "../_shared/supabase_repo.ts";
 import { availableSlots } from "../_shared/availability.ts";
 import { ids, runBot } from "../_shared/bot.ts";
+import { createHandler } from "../whatsapp-webhook/handler.ts";
+import type { Outbound } from "../_shared/outbound.ts";
 
 const REST = Deno.env.get("RENDO_IT_REST_URL");
 const JWT = Deno.env.get("RENDO_IT_JWT");
@@ -183,6 +185,75 @@ Deno.test({
         r = await step({ type: "choice", id: ids.human });
         assertEquals(r.alerts[0].template, "rendo_demande_contact");
         assert((await repo.conversation(me)).handoffRequestedAt !== null);
+      });
+      await t.step("signed webhook -> real database -> replies (no network to Meta)", async () => {
+        const secret = "it_secret";
+        const sent: Outbound[] = [];
+        const alerts: string[] = [];
+        const nowS = Math.floor(Date.now() / 1000);
+        const h = createHandler({
+          env: {
+            ok: true,
+            values: {
+              WHATSAPP_VERIFY_TOKEN: "v",
+              META_APP_SECRET: secret,
+              WHATSAPP_TOKEN: "t",
+              WHATSAPP_PHONE_NUMBER_ID: pnid,
+            },
+          },
+          claim: () => Promise.resolve("new"),
+          repo: () => repo,
+          send: (_to, msg) => (sent.push(msg), Promise.resolve({ ok: true, status: 200 })),
+          sendTemplate: (_to, a) => (alerts.push(a.template), Promise.resolve({ ok: true, status: 200 })),
+          nowSeconds: () => nowS,
+        });
+        const post = async (message: Record<string, unknown>) => {
+          const body = JSON.stringify({
+            object: "whatsapp_business_account",
+            entry: [{
+              changes: [{
+                field: "messages",
+                value: {
+                  metadata: { phone_number_id: pnid },
+                  contacts: [{ wa_id: "237690000081", profile: { name: "Webhook Test" } }],
+                  messages: [{ from: "237690000081", timestamp: String(nowS), ...message }],
+                },
+              }],
+            }],
+          });
+          const key = await crypto.subtle.importKey(
+            "raw",
+            new TextEncoder().encode(secret),
+            { name: "HMAC", hash: "SHA-256" },
+            false,
+            ["sign"],
+          );
+          const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body)));
+          const sig = "sha256=" + Array.from(mac, (b) => b.toString(16).padStart(2, "0")).join("");
+          const res = await h(
+            new Request("http://x/", { method: "POST", headers: { "x-hub-signature-256": sig }, body }),
+          );
+          assertEquals(res.status, 200);
+        };
+        const tapId = (id: string) => ({
+          id: crypto.randomUUID(),
+          type: "interactive",
+          interactive: { type: "button_reply", button_reply: { id, title: "x" } },
+        });
+        await post({ id: crypto.randomUUID(), type: "text", text: { body: "Bonjour" } });
+        assert(sent[0].kind === "buttons" && sent[0].body.startsWith("Bonjour Webhook"));
+        await post(tapId(ids.service(coupe.id)));
+        const days = sent.at(-1)!;
+        assert(days.kind === "list");
+        await post(tapId(days.rows[0].id));
+        const times = sent.at(-1)!;
+        assert(times.kind === "list");
+        await post(tapId(times.rows[0].id));
+        const confirm = sent.at(-1)!;
+        assert(confirm.kind === "buttons");
+        await post(tapId(confirm.buttons[0].id));
+        assert(sent.at(-1)!.body.startsWith("✅"), sent.at(-1)!.body);
+        assertEquals(alerts, ["rendo_nouveau_rdv"]);
       });
     } finally {
       // clean up (appointments block business deletion on purpose: on delete restrict)
