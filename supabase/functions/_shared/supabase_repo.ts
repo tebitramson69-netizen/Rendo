@@ -34,9 +34,9 @@ function fail(operation: string, error: PgError): never {
 }
 
 const BUSINESS_COLUMNS =
-  "id, name, owner_whatsapp, timezone, default_language, slot_minutes, buffer_minutes, booking_horizon_days, min_notice_minutes";
+  "id, name, owner_whatsapp, timezone, default_language, slot_minutes, buffer_minutes, booking_horizon_days, min_notice_minutes, contact_phone";
 const CONVERSATION_COLUMNS =
-  "client_id, business_id, state, context, expires_at, paused_until, last_inbound_at, version";
+  "client_id, business_id, state, context, expires_at, paused_until, last_inbound_at, handoff_requested_at, version";
 
 export class SupabaseRepo implements Repo {
   constructor(private readonly db: SupabaseClient) {}
@@ -108,6 +108,7 @@ export class SupabaseRepo implements Repo {
       expiresAt: null,
       pausedUntil: null,
       lastInboundAt: null,
+      handoffRequestedAt: null,
       version: 0,
       isNew: true,
     };

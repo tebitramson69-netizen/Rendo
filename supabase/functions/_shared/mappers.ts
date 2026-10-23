@@ -61,6 +61,7 @@ export function toBusiness(row: Row): Business {
     bufferMinutes: num(row, "buffer_minutes"),
     horizonDays: num(row, "booking_horizon_days"),
     minNoticeMinutes: num(row, "min_notice_minutes"),
+    contactPhone: strOrNull(row, "contact_phone"),
   };
 }
 
@@ -108,6 +109,7 @@ export function toConversation(row: Row): Conversation {
     expiresAt: dateOrNull(row, "expires_at"),
     pausedUntil: dateOrNull(row, "paused_until"),
     lastInboundAt: dateOrNull(row, "last_inbound_at"),
+    handoffRequestedAt: dateOrNull(row, "handoff_requested_at"),
     version: num(row, "version"),
     isNew: false,
   };
@@ -121,6 +123,7 @@ export function conversationColumns(c: Conversation): Row {
     expires_at: c.expiresAt?.toISOString() ?? null,
     paused_until: c.pausedUntil?.toISOString() ?? null,
     last_inbound_at: c.lastInboundAt?.toISOString() ?? null,
+    handoff_requested_at: c.handoffRequestedAt?.toISOString() ?? null,
   };
 }
 

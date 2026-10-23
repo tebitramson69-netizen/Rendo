@@ -20,6 +20,7 @@ const BUSINESS_ROW = {
   buffer_minutes: 10,
   booking_horizon_days: 10,
   min_notice_minutes: 120,
+  contact_phone: null,
 };
 
 Deno.test("mappers: business row -> Business", () => {
@@ -33,6 +34,7 @@ Deno.test("mappers: business row -> Business", () => {
     bufferMinutes: 10,
     horizonDays: 10,
     minNoticeMinutes: 120,
+    contactPhone: null,
   });
 });
 
@@ -65,6 +67,7 @@ Deno.test("mappers: conversation round trip keeps dates and version", () => {
     expires_at: "2026-11-02T08:00:00+00:00",
     paused_until: null,
     last_inbound_at: "2026-11-01T08:00:00.000Z",
+    handoff_requested_at: null,
     version: 3,
   };
   const c = toConversation(row);
@@ -78,6 +81,7 @@ Deno.test("mappers: conversation round trip keeps dates and version", () => {
     expires_at: "2026-11-02T08:00:00.000Z",
     paused_until: null,
     last_inbound_at: "2026-11-01T08:00:00.000Z",
+    handoff_requested_at: null,
   });
 });
 

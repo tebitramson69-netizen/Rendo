@@ -9,6 +9,7 @@ import { deepStrictEqual as assertEquals, ok as assert } from "node:assert/stric
 import { adminClient } from "../_shared/db.ts";
 import { SupabaseRepo } from "../_shared/supabase_repo.ts";
 import { availableSlots } from "../_shared/availability.ts";
+import { ids, runBot } from "../_shared/bot.ts";
 
 const REST = Deno.env.get("RENDO_IT_REST_URL");
 const JWT = Deno.env.get("RENDO_IT_JWT");
@@ -146,6 +147,42 @@ Deno.test({
         assertEquals(await repo.cancelByClient(up[0].id, client.id, now), "not_found"); // already cancelled
         assertEquals(await repo.upcomingForClient(client.id, now), []);
         assertEquals((await repo.availabilityData(businessId, now, horizonEnd)).busy.length, 0);
+      });
+      await t.step("bot end to end on the real repo: book, conversation saved, cancel", async () => {
+        const b = (await repo.businessByPhoneNumberId(pnid))!;
+        const me = await repo.upsertClient(businessId, {
+          waUserId: "BSUID.IT.BOT",
+          phone: "237690000079",
+          displayName: "Bot Test",
+        });
+        const step = async (event: Parameters<typeof runBot>[0]["event"]) => {
+          const conversation = await repo.conversation(me);
+          const r = await runBot({ business: b, client: me, conversation, event, now: new Date() }, repo);
+          assertEquals(await repo.saveConversation(r.conversation), "saved");
+          return r;
+        };
+        let r = await step({ type: "text", text: "bonjour" });
+        assertEquals(r.replies[0].kind, "buttons");
+        r = await step({ type: "choice", id: ids.service(coupe.id) });
+        const day = r.replies.at(-1)!;
+        assert(day.kind === "list");
+        r = await step({ type: "choice", id: day.rows[0].id });
+        const time = r.replies.at(-1)!;
+        assert(time.kind === "list");
+        r = await step({ type: "choice", id: time.rows[0].id });
+        const confirm = r.replies.at(-1)!;
+        assert(confirm.kind === "buttons");
+        r = await step({ type: "choice", id: confirm.buttons[0].id });
+        assert(r.replies[0].body.startsWith("✅"), r.replies[0].body);
+        assertEquals(r.alerts[0].template, "rendo_nouveau_rdv");
+        assertEquals((await repo.conversation(me)).state, "idle");
+        const [appt] = await repo.upcomingForClient(me.id, new Date());
+        r = await step({ type: "choice", id: ids.cancel(appt.id) });
+        assertEquals(r.alerts[0].template, "rendo_annulation_rdv");
+        assertEquals(await repo.upcomingForClient(me.id, new Date()), []);
+        r = await step({ type: "choice", id: ids.human });
+        assertEquals(r.alerts[0].template, "rendo_demande_contact");
+        assert((await repo.conversation(me)).handoffRequestedAt !== null);
       });
     } finally {
       // clean up (appointments block business deletion on purpose: on delete restrict)

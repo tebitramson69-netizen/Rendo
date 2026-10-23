@@ -17,6 +17,8 @@ export interface Business {
   bufferMinutes: number;
   horizonDays: number;
   minNoticeMinutes: number;
+  /** Public number shown to clients who ask for a person (null = not set). Never owner_whatsapp. */
+  contactPhone: string | null;
 }
 
 export interface Service {
@@ -46,6 +48,8 @@ export interface Conversation {
   expiresAt: Date | null;
   pausedUntil: Date | null;
   lastInboundAt: Date | null;
+  /** Last "talk to a person" request: the owner is alerted at most once per period. */
+  handoffRequestedAt: Date | null;
   /** Version read from the database; a save only succeeds if it is still the current one. */
   version: number;
   /** True when no row exists yet (first message from this client). */
