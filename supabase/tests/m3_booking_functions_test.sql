@@ -99,12 +99,12 @@ begin
   -- P1. only the secret key (service_role) may call the functions
   if has_function_privilege('anon', 'public.rendo_upsert_client(uuid, text, text, text)', 'EXECUTE')
      or has_function_privilege('authenticated', 'public.rendo_upsert_client(uuid, text, text, text)', 'EXECUTE')
-     or has_function_privilege('anon', 'public.rendo_book_appointment(uuid, uuid, uuid, timestamptz)', 'EXECUTE')
-     or has_function_privilege('authenticated', 'public.rendo_book_appointment(uuid, uuid, uuid, timestamptz)', 'EXECUTE')
+     or has_function_privilege('anon', 'public.rendo_book_appointment(uuid, uuid, uuid, timestamptz, uuid[])', 'EXECUTE')
+     or has_function_privilege('authenticated', 'public.rendo_book_appointment(uuid, uuid, uuid, timestamptz, uuid[])', 'EXECUTE')
   then
     raise exception 'P1 FAILED: anon/authenticated can call the booking functions';
   end if;
-  if not has_function_privilege('service_role', 'public.rendo_book_appointment(uuid, uuid, uuid, timestamptz)', 'EXECUTE')
+  if not has_function_privilege('service_role', 'public.rendo_book_appointment(uuid, uuid, uuid, timestamptz, uuid[])', 'EXECUTE')
      or not has_function_privilege('service_role', 'public.rendo_upsert_client(uuid, text, text, text)', 'EXECUTE') then
     raise exception 'P1 FAILED: service_role cannot call the booking functions';
   end if;

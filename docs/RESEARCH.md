@@ -108,3 +108,24 @@ prices (and durations) vary by style, length or consultation.
   extensions are included, sold at the salon, or brought by the client). If the price really differs
   ("mèches du salon" vs "vos mèches"), the owner creates two options instead, each with its own price.
 - "Ok / merci / thanks" now gets a short reply instead of the whole menu again.
+
+## M3.6 product decisions (25 Oct 2026) — after the codebase audit
+
+Decided with Tebit: **style + choices** price model, **built-in understanding first (AI later)**, **several
+chairs**, durations shown to clients as "≈".
+
+- **Price is set by the style and the client's choices, never by the duration.** Duration is kept only so the
+  calendar blocks the chair for the right time (braiders list e.g. "Small knotless back length $285+ · 9h" on
+  Booksy). A style has a base price ("dès" or fixed) and duration, plus up to 3 groups of choices
+  (Taille / Longueur / Mèches); each choice adds to price and time. Estimate = base + additions, shown as an
+  estimate. Bargaining stays with the owner: the bot never discounts; an agreed price is proposed by the owner
+  and accepted by the client before it is recorded (`appointments.agreed_price_xaf`).
+- **Chairs:** `businesses.chairs` = clients served at the same time; each appointment sits on one chair and the
+  no-overlap rule applies per chair (database-enforced). Verified: 4 clients racing for the same slot on a
+  2-chair salon, 30 times → exactly 2 bookings per slot, 0 errors, 0 overlaps on a chair.
+- **Prices saved on the booking:** estimate, price mode and a snapshot of the chosen options. Bookings made
+  before migration 0009 have no estimate (unknown).
+- **Understanding typed requests:** a deterministic matcher (style names + owner-defined aliases + FR/EN words
+  for days, times, length, mèches) answers with real catalogue prices and real availability, and asks only for
+  what is missing. An AI extractor can later plug into the same interface; replies stay templated so prices and
+  slots are never invented. Message text is still never stored; only counts of understood / missed messages.
