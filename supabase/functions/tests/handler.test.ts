@@ -94,6 +94,7 @@ const BUSINESS: Business = {
   minNoticeMinutes: 120,
   contactPhone: null,
   chairs: 1,
+  priceDisplay: "always",
 };
 
 /** Fake services that record what the handler did. */

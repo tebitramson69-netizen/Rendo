@@ -22,6 +22,7 @@ const SALON: Business = {
   minNoticeMinutes: 120,
   contactPhone: null,
   chairs: 2,
+  priceDisplay: "on_request",
 };
 
 const group = (name: string, nameEn: string, choices: Array<[string, string, number, number]>): ChoiceGroup => ({
@@ -114,10 +115,10 @@ Deno.test("flow: one French message -> price answered, only the missing question
   assertEquals(
     last(r).body,
     "Bonjour Ana 👋 Bienvenue chez Salon Belle Vie.\n\n" +
-      "Tresses – Knotless (Dos, Vos mèches) : dès 18 000 FCFA, environ 5 h.\n\n" +
+      "Tresses – Knotless (Dos, Vos mèches) : dès 18 000 FCFA.\n\n" +
       "Le prix exact dépend de vos choix 👇\n\n" +
       "Tresses – Knotless (Dos, Vos mèches) — choisissez : Taille\n\n" +
-      "• Jumbo : dès 18 000 FCFA · ≈ 5 h\n• Medium : dès 23 000 FCFA · ≈ 6 h\n• Small : dès 28 000 FCFA · ≈ 7 h",
+      "• Jumbo : dès 18 000 FCFA\n• Medium : dès 23 000 FCFA\n• Small : dès 28 000 FCFA", // asked -> prices, never durations
   );
   assertEquals(btns(last(r)).map((b) => b.title), ["Jumbo", "Medium", "Small"]);
 
@@ -125,12 +126,13 @@ Deno.test("flow: one French message -> price answered, only the missing question
   r = await send(s.repo, c, tap(btns(last(r))[1].id));
   assertEquals(last(r).body, "Tresses – Knotless (Medium, Dos, Vos mèches) – Sam. 31 oct. : à quelle heure ?");
   assertEquals(rowsOf(last(r)).map((x) => x.title), ["9h00", "9h30", "10h00", "10h30", "11h00"]); // 6 h must end by 17h
-  assertEquals(rowsOf(last(r))[0].description, "Fin vers 15h00");
+  assertEquals(rowsOf(last(r))[0].description, undefined); // no end time shown
 
-  // 9h -> summary with the estimate, the approximate duration and the salon's note
+  // 9h -> summary with the estimate and the salon's note (no duration)
   r = await send(s.repo, c, tap(rowsOf(last(r))[0].id));
   const summary = last(r).body;
-  assert(summary.includes("• Tresses – Knotless (Medium, Dos, Vos mèches) (≈ 6 h)"), summary);
+  assert(summary.includes("• Tresses – Knotless (Medium, Dos, Vos mèches)\n"), summary);
+  assert(!summary.includes("≈"), summary);
   assert(summary.includes("• samedi 31 octobre à 9h00"));
   assert(summary.includes("• Prix : à partir de 23 000 FCFA"));
   assert(summary.includes("ℹ️ Prix final selon le modèle, confirmé au salon."));
@@ -138,11 +140,11 @@ Deno.test("flow: one French message -> price answered, only the missing question
   // confirm -> booked with the estimate saved, and the owner sees the choices
   r = await send(s.repo, c, tap(btns(last(r))[0].id));
   assert(last(r).body.startsWith("✅ Rendez-vous confirmé !\nTresses – Knotless (Medium, Dos, Vos mèches)"), last(r).body);
-  assert(last(r).body.includes("samedi 31 octobre à 9h00 chez Salon Belle Vie (≈ 6 h)"));
+  assert(last(r).body.includes("samedi 31 octobre à 9h00 chez Salon Belle Vie\n"));
   assert(last(r).body.includes("Prix : à partir de 23 000 FCFA"));
   const appt = s.repo.appointments[0];
   assertEquals([appt.estimateXaf, appt.choiceIds.length], [23000, 3]);
-  assertEquals(appt.end.toISOString(), at("2026-10-31 15:00").toISOString());
+  assertEquals(appt.end.toISOString(), at("2026-10-31 15:00").toISOString()); // the chair is still blocked 6 h
   assertEquals(r.alerts[0].params[1], "Tresses – Knotless (Medium, Dos, Vos mèches)");
 });
 
@@ -154,8 +156,8 @@ Deno.test("flow: the same request in English from a new client is answered in En
     c,
     say("Hi, how much is long knotless braids if I bring my own hair? Can I come Saturday morning?"),
   );
-  assert(last(r).body.includes("Braids – Knotless (Back, Your own hair): from 18,000 FCFA, about 5 h."), last(r).body);
-  assert(last(r).body.includes("• Medium: from 23,000 FCFA · ≈ 6 h"));
+  assert(last(r).body.includes("Braids – Knotless (Back, Your own hair): from 18,000 FCFA."), last(r).body);
+  assert(last(r).body.includes("• Medium: from 23,000 FCFA"));
   assertEquals(s.repo.languageChanges, [[c.id, "en"]]);
 });
 
@@ -185,11 +187,12 @@ Deno.test("flow: several styles match -> the client picks; a price question gets
   let r = await send(s.repo, c, say("je veux des tresses"));
   assert(last(r).body.endsWith("Laquelle de ces prestations souhaitez-vous ?"));
   assertEquals(rowsOf(last(r)).map((x) => [x.title, x.description]), [
-    ["Knotless", "4 h · dès 15 000 FCFA"],
-    ["Box braids", "3 h · dès 12 000 FCFA"],
+    ["Knotless", undefined], // not asked: no prices (salon setting "on_request")
+    ["Box braids", undefined],
   ]);
   r = await send(s.repo, c, say("c'est combien les tresses ?"));
   assert(last(r).body.includes("Voici nos prestations et leurs prix 👇"));
+  assertEquals(rowsOf(last(r)).map((x) => x.description), ["dès 15 000 FCFA", "dès 12 000 FCFA"]); // asked: prices
 });
 
 Deno.test("flow: something not offered is said honestly, with the real list", async () => {
@@ -301,7 +304,7 @@ Deno.test("flow: more than 3 options -> a list; more than 10 services -> pages",
   let r = await send(s.repo, c, tap(ids.style(D(s.knotless.id))));
   assertEquals(last(r).kind, "list");
   assertEquals(rowsOf(last(r)).map((x) => x.title), ["Jumbo", "Medium", "Small", "Micro"]);
-  assertEquals(rowsOf(last(r))[3].description, "dès 30 000 FCFA · ≈ 7 h");
+  assertEquals(rowsOf(last(r))[3].description, undefined); // prices not asked (on_request)
 
   for (let i = 1; i <= 10; i++) {
     s.repo.services.push(svc({ businessId: SALON.id, name: `Soin ${i}`, durationMinutes: 30, priceXaf: 1000 * i }));
@@ -319,4 +322,107 @@ Deno.test("flow: tap ids with 3 options stay within WhatsApp's 200-character lim
   for (const id of [ids.style(d), ids.day(d, "2026-10-31", "afternoon"), ids.more(d, "2026-10-31", Date.now()), ids.time(d, Date.now()), ids.confirm(d, Date.now())]) {
     assert(id.length <= 200, `${id.length}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// M3.7: talk like a salon — say what we do, no durations, prices as the salon decides
+// ---------------------------------------------------------------------------
+const FCFA = /FCFA/;
+const allText = (r: BotResult) =>
+  r.replies.map((m) => [m.body, ...btns(m).map((b) => b.title), ...rowsOf(m).map((x) => `${x.title} ${x.description ?? ""}`)].join("\n"))
+    .join("\n");
+
+Deno.test("talk: a first 'bonjour' says, in one sentence, what the salon does", async () => {
+  const s = salon();
+  const c = await client(s.repo);
+  const r = await send(s.repo, c, say("bonjour"));
+  assertEquals(
+    last(r).body,
+    "Bonjour Ana 👋 Bienvenue chez Salon Belle Vie.\n\n" +
+      "Chez nous : tresses (knotless, box braids), coupe et conseil beauté.\n\n" +
+      "Dites-moi simplement ce que vous souhaitez, par exemple « knotless samedi matin », ou choisissez ci-dessous 👇",
+  );
+  assertEquals(btns(last(r)).map((b) => b.title), ["Prendre rendez-vous", "Mes rendez-vous", "Parler à quelqu'un"]);
+  assert(!FCFA.test(allText(r)), "no prices in a greeting");
+
+  const en = await send(s.repo, await client(s.repo, "237690000001", "Joy"), say("good morning"));
+  assert(last(en).body.includes("We offer: braids (knotless, box braids), haircut and conseil beauté."), last(en).body);
+});
+
+Deno.test("talk: 'vous faites quoi ?' is answered naturally; with 'prix' it gets the priced list", async () => {
+  const s = salon();
+  const c = await client(s.repo);
+  await send(s.repo, c, say("bonjour"));
+  let r = await send(s.repo, c, say("vous faites quoi comme services ?"));
+  assertEquals(
+    last(r).body,
+    "Chez nous : tresses (knotless, box braids), coupe et conseil beauté.\n\n" +
+      "Qu'est-ce qui vous ferait plaisir ? Écrivez-le simplement, par exemple « knotless samedi matin », ou appuyez sur « Prendre rendez-vous » 👇",
+  );
+  r = await send(s.repo, c, say("quels sont vos services et vos prix ?"));
+  assert(last(r).body.includes("Voici nos prestations et leurs prix 👇"), last(r).body);
+  assert(rowsOf(last(r)).some((x) => x.description === "3 000 FCFA"));
+});
+
+Deno.test("talk: 'je veux prendre rendez-vous pour ma fille' is a booking, never 'we don't offer that'", async () => {
+  const s = salon();
+  const c = await client(s.repo);
+  const r = await send(s.repo, c, say("je veux prendre rendez-vous pour ma fille"));
+  assert(!last(r).body.includes("nous ne proposons pas"), last(r).body);
+  assertEquals(r.conversation.state, "services");
+});
+
+Deno.test("talk: no durations anywhere, and with 'on_request' no price until asked — except the summary", async () => {
+  const s = salon();
+  const c = await client(s.repo);
+  let r = await send(s.repo, c, say("knotless samedi matin"));
+  assertEquals(last(r).body, "Bonjour Ana 👋 Bienvenue chez Salon Belle Vie.\n\nTresses – Knotless — choisissez : Taille");
+  const seen: string[] = [allText(r)];
+  for (const pick of [0, 0, 0]) { // Jumbo, Épaules, Vos mèches
+    r = await send(s.repo, c, tap(btns(last(r))[pick].id));
+    seen.push(allText(r));
+  }
+  assertEquals(last(r).body, "Tresses – Knotless (Jumbo, Épaules, Vos mèches) – Sam. 31 oct. : à quelle heure ?");
+  r = await send(s.repo, c, tap(rowsOf(last(r))[0].id));
+  const summary = last(r).body;
+  assert(summary.includes("• Prix : à partir de 15 000 FCFA"), summary); // the client knows before confirming
+  r = await send(s.repo, c, tap(btns(last(r))[0].id));
+  seen.push(summary, allText(r));
+  assert(!FCFA.test(seen.slice(0, 4).join("\n")), "no price before the summary");
+  for (const t of seen) assert(!/≈|\d h\b|Fin vers|environ/.test(t), t);
+});
+
+Deno.test("talk: salon setting 'always' shows prices without being asked", async () => {
+  const s = salon({ ...SALON, priceDisplay: "always" });
+  const c = await client(s.repo);
+  const r = await send(s.repo, c, say("knotless"));
+  assert(last(r).body.endsWith("• Jumbo : dès 15 000 FCFA\n• Medium : dès 20 000 FCFA\n• Small : dès 25 000 FCFA"), last(r).body);
+});
+
+Deno.test("talk: salon setting 'never' never quotes an amount, even when asked", async () => {
+  const s = salon({ ...SALON, priceDisplay: "never" });
+  const c = await client(s.repo);
+  let r = await send(s.repo, c, say("c'est combien les knotless jumbo épaules avec mes mèches samedi à 10h ?"));
+  assert(last(r).body.includes("Le prix se fixe au salon, selon le modèle 🙂"), last(r).body);
+  assert(last(r).body.includes("• Prix : à convenir au salon"), last(r).body);
+  const texts = [allText(r)];
+  r = await send(s.repo, c, tap(btns(last(r))[0].id));
+  texts.push(allText(r));
+  assert(last(r).body.includes("Prix : à convenir au salon"), last(r).body);
+  r = await send(s.repo, c, say("les prix svp"));
+  texts.push(allText(r));
+  assert(!FCFA.test(texts.join("\n")), texts.join("\n---\n"));
+  assertEquals(s.repo.appointments[0].estimateXaf, 15000); // still saved for the owner
+});
+
+Deno.test("talk: once the client asked the price, the next questions of the same booking keep showing prices", async () => {
+  const s = salon();
+  const c = await client(s.repo);
+  let r = await send(s.repo, c, say("c'est combien les knotless ?"));
+  assert(last(r).body.includes("• Jumbo : dès 15 000 FCFA"), last(r).body);
+  r = await send(s.repo, c, tap(btns(last(r))[0].id)); // Jumbo -> Longueur
+  assert(last(r).body.endsWith("• Épaules : dès 15 000 FCFA\n• Dos : dès 18 000 FCFA"), last(r).body);
+  // a new booking later (flow finished / expired) starts without prices again
+  r = await send(s.repo, c, say("knotless"), new Date(NOW.getTime() + 3 * 3600_000));
+  assert(!FCFA.test(last(r).body), last(r).body);
 });

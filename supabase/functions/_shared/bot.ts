@@ -31,7 +31,7 @@ import type {
 import {
   categoryTitle,
   dayLabel,
-  durationLabel,
+  inSentence,
   localDateOf,
   longDay,
   noteOf,
@@ -295,6 +295,12 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
   const expired = conv.isNew || conv.state === "idle" ||
     (conv.expiresAt !== null && conv.expiresAt.getTime() <= now.getTime());
   const unknownCount = expired ? 0 : Number(conv.context.unknown ?? 0);
+  // Prices: the salon decides (businesses.price_display). "on_request" shows them once the client has asked
+  // in this flow, and always in the summary before Confirmer.
+  let pricesAsked = !expired && conv.context.pr === true;
+  const listPrices = () =>
+    business.priceDisplay === "always" || (business.priceDisplay === "on_request" && pricesAsked);
+  const neverPrices = business.priceDisplay === "never";
 
   let screen: Screen = "idle";
   let context: Record<string, ContextValue> = {};
@@ -351,8 +357,9 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     const from = d.service.priceMode === "from" || open;
     return from ? (lang === "fr" ? `dès ${priceLabel(p, lang)}` : `from ${priceLabel(p, lang)}`) : priceLabel(p, lang);
   };
-  /** Summary price: "3 000 FCFA", "à partir de 24 000 FCFA", "confirmé sur place". */
+  /** Summary price: "3 000 FCFA", "à partir de 24 000 FCFA", "confirmé sur place", "à convenir au salon". */
   const priceLongOf = (d: Draft) => {
+    if (neverPrices) return t().priceAtSalon;
     if (d.service.priceMode === "on_site") return lang === "fr" ? "confirmé sur place" : "confirmed on site";
     const p = priceOf(d);
     if (p === null) return null;
@@ -360,18 +367,36 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
       ? (lang === "fr" ? `à partir de ${priceLabel(p, lang)}` : `from ${priceLabel(p, lang)}`)
       : priceLabel(p, lang);
   };
-  const styleDesc = (s: Service) => {
-    const d = makeDraft(s, [])!;
-    return [durationLabel(minutesOf(d), lang), priceShortOf(d, undefined, s.groups.length > 0)]
-      .filter(Boolean).join(" · ");
+  /** List row description: the price when prices are shown, otherwise nothing (durations are never shown). */
+  const styleDesc = (s: Service) => (listPrices() ? priceShortOf(makeDraft(s, [])!, undefined, s.groups.length > 0) ?? undefined : undefined);
+
+  /** "Chez nous : coiffure (coupe, brushing), tresses (knotless, box braids), manucure et conseil beauté." */
+  const offerSentence = async (): Promise<string | null> => {
+    const all = await catalog();
+    if (all.length === 0) return null;
+    const byCategory = new Map<string, Service[]>();
+    for (const sv of all) {
+      const key = sv.category ? `c:${sv.category}` : `s:${sv.id}`;
+      byCategory.set(key, [...(byCategory.get(key) ?? []), sv]);
+    }
+    const items = [...byCategory.values()].slice(0, 6).map((g) => {
+      if (!g[0].category) return inSentence(serviceTitle(g[0], lang));
+      const names = g.slice(0, 4).map((x) => inSentence(serviceTitle(x, lang)));
+      if (g.length > 4) names.push("…");
+      return `${inSentence(categoryTitle(g[0], lang))} (${names.join(", ")})`;
+    });
+    if (byCategory.size > 6) items.push(t().andMore);
+    return t().weOffer(items);
   };
 
   // ----- screens -------------------------------------------------------------
-  const menu = (greet: boolean, prefix: string[] = []) => {
+  const menu = async (greet: boolean, prefix: string[] = [], question?: string) => {
     const lines = [...prefix];
-    if (greet) {
-      lines.push(t().greeting(firstName(client.displayName ?? ""), business.name));
-      lines.push(t().askOpen);
+    if (greet) lines.push(t().greeting(firstName(client.displayName ?? ""), business.name));
+    if (greet || question) {
+      const offer = await offerSentence();
+      if (offer) lines.push(offer);
+      lines.push(question ?? t().askOpen);
     } else lines.push(t().menuQuestion);
     replies.push(buttons(lines.join("\n\n"), [
       { id: ids.book, title: t().btnBook },
@@ -406,7 +431,7 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
         return { id: ids.style({ sid: g[0].id, choices: [] }), title: serviceFullName(g[0], lang), description: styleDesc(g[0]) };
       }
       const prices = g.filter((x) => x.priceMode !== "on_site" && x.priceXaf !== null).map((x) => x.priceXaf!);
-      const from = prices.length
+      const from = prices.length && listPrices()
         ? (lang === "fr" ? `dès ${priceLabel(Math.min(...prices), lang)}` : `from ${priceLabel(Math.min(...prices), lang)}`)
         : null;
       return {
@@ -443,13 +468,15 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
   type When = { day?: string | null; part?: PartOfDay | null; time?: string | null };
   const askGroup = (d: Draft, g: ChoiceGroup, prefix: string[] = [], when: When = {}) => {
     const more = d.groups.some((x) => x.id !== g.id && !d.picked.has(x.id)); // other questions still to come
-    const lines = g.choices.slice(0, PAGE).map((c) =>
-      t().optionLine(choiceName(c), priceShortOf(d, c, more), durationLabel(minutesOf(d, c), lang))
-    );
+    const priceFor = (c: ServiceChoice) => (listPrices() ? priceShortOf(d, c, more) : null);
+    const lines = g.choices.slice(0, PAGE).flatMap((c) => {
+      const p = priceFor(c);
+      return p ? [t().optionLine(choiceName(c), p)] : [];
+    });
     const body = withPrefix(prefix, t().chooseOption(draftName(d), groupName(g)));
     const idFor = (c: ServiceChoice) => ids.style({ sid: d.service.id, choices: [...draftIds(d).choices, c.id] });
     if (g.choices.length <= 3) {
-      replies.push(buttons(`${body}\n\n${lines.join("\n")}`, g.choices.map((c) => ({ id: idFor(c), title: choiceName(c) }))));
+      replies.push(buttons(withPrefix([body], lines.join("\n")), g.choices.map((c) => ({ id: idFor(c), title: choiceName(c) }))));
     } else {
       replies.push(list(
         body,
@@ -458,7 +485,7 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
         g.choices.slice(0, PAGE).map((c) => ({
           id: idFor(c),
           title: choiceName(c),
-          description: [priceShortOf(d, c, more), `≈ ${durationLabel(minutesOf(d, c), lang)}`].filter(Boolean).join(" · "),
+          description: priceFor(c) ?? undefined,
         })),
       ));
     }
@@ -510,7 +537,6 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     const rows: ListRow[] = page.map((s) => ({
       id: ids.time(draftIds(d), s.start.getTime()),
       title: timeLabel(s.start, tz, lang),
-      description: t().endsAround(timeLabel(s.end, tz, lang)),
     }));
     if (page.length < slots.length) {
       rows.push({ id: ids.more(draftIds(d), date, page[page.length - 1].start.getTime()), title: t().later, description: t().laterDesc });
@@ -529,7 +555,6 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     const body = t().confirmQuestion(
       draftName(d),
       whenLabel(slot.start, tz, lang),
-      `≈ ${durationLabel(minutesOf(d), lang)}`,
       business.name,
       priceLongOf(d),
       noteOf(d.service, lang),
@@ -578,7 +603,7 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     const result = await repo.book(business.id, client.id, d.service.id, slot.start, draftIds(d).choices);
     if (result.status === "slot_taken") return times(d, date, { prefix: [t().slotTaken] });
     if (result.status === "invalid") return menu(false, [t().bookingFailed]);
-    const price = d.service.priceMode === "on_site"
+    const price = neverPrices || d.service.priceMode === "on_site"
       ? priceLongOf(d)
       : result.estimateXaf === null
       ? null
@@ -590,7 +615,6 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
       whenLabel(result.startsAt, tz, lang),
       business.name,
       result.bookingCode,
-      durationLabel(minutesOf(d), lang),
       price,
     )));
     alerts.push({
@@ -736,6 +760,7 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
       await repo.setClientLanguage(client.id, u.language);
       lang = u.language;
     }
+    if (u.asksPrice || u.intent === "price") pricesAsked = true;
 
     switch (u.intent) {
       case "lang_fr":
@@ -759,6 +784,12 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     const greet = conv.isNew || expired ? [t().greeting(firstName(client.displayName ?? ""), business.name)] : [];
     const when = { day: u.day, part: u.partOfDay, time: u.time };
 
+    // "vous faites quoi ?": say what the salon does, in one sentence, then let the client say what she wants
+    if (u.intent === "services") {
+      if (u.asksPrice && !neverPrices) return services([...greet, t().priceListIntro]);
+      return menu(conv.isNew || expired, [], t().askWhich);
+    }
+
     // 1. a precise style: answer with its price, then ask only what is missing
     if (u.styleId) {
       const service = all.find((s) => s.id === u.styleId)!;
@@ -775,15 +806,19 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
       const prefix = [...greet];
       if (u.asksPrice || u.intent === "price") {
         const open = nextGroup(d) !== null;
-        prefix.push(t().priceIntro(draftName(d), priceShortOf(d, undefined, open), durationLabel(minutesOf(d), lang)));
-        if (open && d.service.priceMode !== "on_site") prefix.push(t().priceDepends);
+        if (neverPrices) prefix.push(t().priceNever);
+        else {
+          prefix.push(t().priceIntro(draftName(d), priceShortOf(d, undefined, open)));
+          if (open && d.service.priceMode !== "on_site") prefix.push(t().priceDepends);
+        }
       }
       return proceed(d, when, prefix);
     }
     // 2. several styles fit ("tresses"): let the client pick
     if (u.styleCandidates.length > 1) {
       const styles = all.filter((s) => u.styleCandidates.includes(s.id));
-      return styleList(styles, t().chooseStyle, [...greet, ...(u.asksPrice ? [t().priceListIntro] : [])]);
+      const about = u.asksPrice ? [neverPrices ? t().priceNever : t().priceListIntro] : [];
+      return styleList(styles, t().chooseStyle, [...greet, ...about]);
     }
     // 3. only a day/time while a draft is in progress ("samedi plutôt", "14h") -> continue that draft
     if ((u.day || u.time || u.partOfDay) && !expired) {
@@ -796,7 +831,7 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     // 4. asked for something the salon doesn't list
     if (u.noMatch) return services([...greet, t().notOffered]);
     // 5. general price question or booking wish
-    if (u.intent === "price") return services([...greet, t().priceListIntro]);
+    if (u.intent === "price") return services([...greet, neverPrices ? t().priceNever : t().priceListIntro]);
     if (u.intent === "book") return services(greet);
     // 6. not understood
     if (expired) return menu(true);
@@ -865,11 +900,15 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
 
   if (event.type === "text") await handleText(event.text);
   else if (event.type === "choice") await handleChoice(event.id);
-  else menu(true);
+  else await menu(true);
 
   // ----- conversation update -------------------------------------------------
   conv.state = screen;
-  conv.context = unknown > 0 ? { ...context, unknown } : context;
+  conv.context = {
+    ...context,
+    ...(pricesAsked && screen !== "idle" ? { pr: true } : {}), // keep showing prices in this flow once asked
+    ...(unknown > 0 ? { unknown } : {}),
+  };
   conv.expiresAt = screen === "idle" ? null : new Date(now.getTime() + FLOW_TTL_MS);
   conv.lastInboundAt = now;
   return { replies, alerts, conversation: conv };

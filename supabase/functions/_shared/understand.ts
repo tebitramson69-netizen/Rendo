@@ -50,6 +50,7 @@ export type Intent =
   | "mine" // see / cancel my appointments
   | "reschedule"
   | "price" // asks how much
+  | "services" // asks what the salon does ("vous faites quoi ?", "what services do you offer?")
   | "book" // wants an appointment
   | "unknown";
 
@@ -149,7 +150,11 @@ const MINE = /\b(annul\w*|cancel\w*|mes rdv|mes rendez vous|my appointments?|my 
 // "Vous faites les vanilles ?", "do you do pedicure?" = asking whether the salon offers something
 const ASK_SERVICE =
   /\b(vous faites|faites vous|vous proposez|proposez vous|avez vous|vous avez|do you (do|offer|have)|can you do)\b/;
-const PRICE = /\b(combien|prix|tarifs?|cout\w*|coute\w*|how much|price\w*|cost\w*|rate\w*)\b/;
+// "combines" = "combien" after a phone's English autocorrect
+const PRICE = /\b(combien|combie|combines?|prix|tarifs?|cout\w*|coute\w*|how much|price\w*|cost\w*|rate\w*)\b/;
+// "what do you do?" = asking for the list of services, not for one service
+const SERVICES =
+  /\b(vous faites quoi|faites quoi|vous proposez quoi|vous offrez quoi|qu est ce que vous (faites|proposez|offrez)|quels? (sont )?(vos |les )?(services|prestations|styles|coiffures)|quelles? (sont )?(vos |les )?(prestations|coiffures)|vos (services|prestations)|liste des (services|prestations)|what (services|do you (do|offer|have))|which services|your services|services do you)\b/;
 const BOOK =
   /\b(rdv|rendez vous|rendezvous|reserv\w*|book\w*|appointment|passer|venir|dispo\w*|libre|available|free|come|slot|creneau\w*|place)\b/;
 const GREETING_START = /^(bonjour|bonsoir|salut|hello|hi|hey|bjr|slt|cc|coucou|good (morning|afternoon|evening))\b/;
@@ -493,7 +498,7 @@ function scoreStyles(catalog: CatalogStyle[], words: string[]): { best: StyleSco
 
 // Words that carry no request content (used to decide "asked for something we don't offer")
 const FILLER = new Set([
-  ..."bonjour bonsoir salut hello hi hey svp sil vous plait please merci thanks thank je j tu vous nous on il elle c est ce cette ces le la les l un une des de du d a au aux en et ou mais pour avec sans sur dans par pas ne n que qu qui quoi quel quelle quels quelles combien prix tarif tarifs cout coute how much price cost is the a an of for with my your i you we can could would like want voudrais veux voulais peux pourrais faire fais do does did passer venir come book rdv rendez appointment reserver disponible dispo libre available free demain aujourd hui today tomorrow matin soir apres midi morning afternoon evening samedi dimanche lundi mardi mercredi jeudi vendredi saturday sunday monday tuesday wednesday thursday friday h heure heures am pm svp stp please ok oui yes non no there here what when where moi me mon ma mes propres meches meche own hair bring apporte coiffure coiffer hairstyle style service services prestation prestations faites faire fait offrez proposez offer have avez as cher pas encore aussi also too still just juste svp"
+  ..."bonjour bonsoir salut hello hi hey svp sil vous plait please merci thanks thank je j tu vous nous on il elle c est ce cette ces le la les l un une des de du d a au aux en et ou mais pour avec sans sur dans par pas ne n que qu qui quoi quel quelle quels quelles combien prix tarif tarifs cout coute how much price cost is the a an of for with my your i you we can could would like want voudrais veux voulais peux pourrais faire fais do does did passer venir come book rdv rendez appointment reserver disponible dispo libre available free demain aujourd hui today tomorrow matin soir apres midi morning afternoon evening samedi dimanche lundi mardi mercredi jeudi vendredi saturday sunday monday tuesday wednesday thursday friday h heure heures am pm svp stp please ok oui yes non no there here what when where moi me mon ma mes propres meches meche own hair bring apporte coiffure coiffer hairstyle style service services prestation prestations faites faire fait offrez proposez offer have avez as cher comme genre type quoi aimerais souhaite souhaiterais besoin voir savoir chez salon ici combines combie pas encore aussi also too still just juste svp"
     .split(" "),
 ]);
 
@@ -559,6 +564,7 @@ export function understand(raw: string, catalog: CatalogStyle[], now: Date, time
   if (HUMAN.test(text)) result.intent = "human";
   else if (RESCHEDULE.test(text)) result.intent = "reschedule";
   else if (MINE.test(text)) result.intent = "mine";
+  else if (SERVICES.test(text) && !result.styleId && !result.styleCandidates.length) result.intent = "services";
   else if (result.asksPrice) result.intent = "price";
   else if (
     ASK_SERVICE.test(text) || BOOK.test(text) || result.day || result.time || result.styleId ||
@@ -567,8 +573,13 @@ export function understand(raw: string, catalog: CatalogStyle[], now: Date, time
     result.intent = "book";
   } else if (GREETING_START.test(text)) result.intent = "greeting";
 
-  // asked for something the salon doesn't list?
-  if ((result.intent === "price" || result.intent === "book") && !result.styleId && !result.styleCandidates.length) {
+  // asked for something the salon doesn't list? Only when the client NAMES a thing in a question about
+  // it ("vous faites les vanilles ?", "combien la pédicure ?"); "je veux prendre rendez-vous pour ma fille"
+  // is a booking wish, never "we don't offer that".
+  if (
+    (result.intent === "price" || (result.intent === "book" && ASK_SERVICE.test(text))) &&
+    !result.styleId && !result.styleCandidates.length
+  ) {
     const content = words.filter((w) =>
       !FILLER.has(w) && !/^\d+$/.test(w) && !/^\d+h\d*$/.test(w) &&
       !WEEKDAYS.some(([, re]) => re.test(w)) && !MONTHS.some((re) => re.test(w)) && w.length > 2

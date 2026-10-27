@@ -21,6 +21,7 @@ const BUSINESS: Business = {
   minNoticeMinutes: 120,
   contactPhone: null,
   chairs: 1,
+  priceDisplay: "always",
 };
 
 const D = (sid: string, choices: string[] = []) => ({ sid, choices });
@@ -96,7 +97,8 @@ Deno.test("bot: a first 'hello' greets naturally, invites a free request, and of
   assertEquals(
     bodyOf(r.replies[0]),
     "Bonjour Marie 👋 Bienvenue chez Rendo Démo.\n\n" +
-      "Dites-moi ce que vous souhaitez, par exemple « knotless samedi matin », ou choisissez ci-dessous 👇",
+      "Chez nous : coupe et tresses.\n\n" +
+      "Dites-moi simplement ce que vous souhaitez, par exemple « knotless samedi matin », ou choisissez ci-dessous 👇",
   );
   assertEquals(buttonsOf(r.replies[0]).map((b) => b.id), [ids.book, ids.mine, ids.human]);
   assertEquals(r.replies[0].kind === "buttons" && r.replies[0].footer, "Reply EN for English");
@@ -129,8 +131,8 @@ Deno.test("bot: full booking — service, day, time page 2, confirm, booked + ow
   // services: active only, with duration and price when set
   let r = await send(repo, c, tap(ids.book));
   assertEquals(rowsOf(last(r)).map((x) => [x.title, x.description]), [
-    ["Coupe", "30 min · 3 000 FCFA"],
-    ["Tresses", "2 h"],
+    ["Coupe", "3 000 FCFA"],
+    ["Tresses", undefined], // no price set, and durations are never shown
   ]);
 
   // days: Monday is "Demain" (tomorrow), 16 free slots (08-12 and 14-18, every 30 min)
@@ -146,7 +148,7 @@ Deno.test("bot: full booking — service, day, time page 2, confirm, booked + ow
   let times = rowsOf(last(r));
   assertEquals(times.length, 10);
   assertEquals(times.slice(0, 3).map((x) => x.title), ["8h00", "8h30", "9h00"]);
-  assertEquals(times[0].description, "Fin vers 8h30");
+  assertEquals(times[0].description, undefined); // no end time / duration shown to clients
   assertEquals(times[9].title, "Plus tard…");
 
   // page 2: the 7 remaining slots, no "later" row
@@ -300,11 +302,11 @@ Deno.test("bot: EN / FR switch is saved and the menu changes language", async ()
   const menuMsg = last(r);
   assertEquals(menuMsg.kind === "buttons" && menuMsg.footer, "Écrivez FR pour le français");
   r = await send(repo, c, tap(ids.book));
-  assertEquals(rowsOf(last(r))[0].description, "30 min · 3,000 FCFA");
+  assertEquals(rowsOf(last(r))[0].description, "3,000 FCFA");
   r = await send(repo, c, say("fr"));
   // the client stays on the same step (the services list), now in French
   assert(bodyOf(last(r)).startsWith("C'est noté, je vous parle en français."));
-  assertEquals(rowsOf(last(r))[0].description, "30 min · 3 000 FCFA");
+  assertEquals(rowsOf(last(r))[0].description, "3 000 FCFA");
   r = await send(repo, c, tap(ids.menu));
   assertEquals(buttonsOf(last(r))[0].title, "Prendre rendez-vous");
 });
@@ -352,7 +354,7 @@ Deno.test("bot: long names never break WhatsApp limits; template params have no 
   );
   const c = await client(repo, "237690000000", "Marie\nNgo\t\tépouse   Kamga");
   let r = await send(repo, c, tap(ids.book)); // limits checked inside send()
-  assert(rowsOf(last(r)).some((x) => x.description === "1 h 30 · 1 250 000 FCFA"));
+  assert(rowsOf(last(r)).some((x) => x.description === "1 250 000 FCFA"));
   r = await send(repo, c, tap(ids.human));
   assertEquals(r.alerts[0].params[0], "Marie Ngo épouse Kamga");
   assertEquals(templateParam("  \n "), "-");
@@ -421,22 +423,22 @@ function salon() {
   return { repo, coupe, courtes, longues, manucure, conseil };
 }
 
-Deno.test("catalogue: categories first, then variants with their own duration and 'from' price", async () => {
+Deno.test("catalogue: categories first, then variants with their own from-price (durations never shown)", async () => {
   const { repo, coupe, courtes, longues } = salon();
   const c = await client(repo);
   let r = await send(repo, c, tap(ids.book));
   // single-option category is shown as the service itself; multi-option category as a group
   assertEquals(rowsOf(last(r)).map((x) => [x.id, x.title, x.description]), [
-    [ids.service(coupe.id), "Coiffure – Coupe", "30 min · 3 000 FCFA"],
+    [ids.service(coupe.id), "Coiffure – Coupe", "3 000 FCFA"],
     [ids.group(courtes.id), "Tresses", "2 options · dès 10 000 FCFA"],
-    [rowsOf(last(r))[2].id, "Manucure", "45 min · 4 000 FCFA"],
-    [rowsOf(last(r))[3].id, "Consultation", "30 min · prix sur place"],
+    [rowsOf(last(r))[2].id, "Manucure", "4 000 FCFA"],
+    [rowsOf(last(r))[3].id, "Consultation", "prix sur place"],
   ]);
   r = await send(repo, c, tap(ids.group(courtes.id)));
   assertEquals(bodyOf(last(r)), "Tresses : quelle option souhaitez-vous ?");
   assertEquals(rowsOf(last(r)).map((x) => [x.title, x.description]), [
-    ["Courtes", "3 h · dès 10 000 FCFA"],
-    ["Longues", "4 h · dès 18 000 FCFA"],
+    ["Courtes", "dès 10 000 FCFA"],
+    ["Longues", "dès 18 000 FCFA"],
   ]);
   assertEquals(r.conversation.state, "variants");
 
@@ -444,15 +446,13 @@ Deno.test("catalogue: categories first, then variants with their own duration an
   r = await send(repo, c, tap(ids.service(longues.id)));
   assertEquals(bodyOf(last(r)), "Tresses – Longues : quel jour vous arrange ?");
   r = await send(repo, c, tap(ids.day(D(longues.id), "2026-11-02")));
-  assertEquals(rowsOf(last(r)).map((x) => [x.title, x.description]), [["8h00", "Fin vers 12h00"], [
-    "14h00",
-    "Fin vers 18h00",
-  ]]);
+  assertEquals(rowsOf(last(r)).map((x) => [x.title, x.description]), [["8h00", undefined], ["14h00", undefined]]);
 
   // summary: full name, "à partir de" price, and the business's note
   r = await send(repo, c, tap(ids.time(D(longues.id), at("2026-11-02 08:00").getTime())));
   const body = bodyOf(last(r));
-  assert(body.includes("• Tresses – Longues (≈ 4 h)"));
+  assert(body.includes("• Tresses – Longues\n"));
+  assert(!body.includes("≈") && !body.includes(" h)"), body); // no duration shown
   assert(body.includes("• Prix : à partir de 18 000 FCFA"));
   assert(body.includes("ℹ️ Prix selon la longueur."));
 
@@ -476,15 +476,15 @@ Deno.test("catalogue: English client sees English names, categories, prices and 
   await send(repo, c, say("EN"));
   let r = await send(repo, c, tap(ids.book));
   assertEquals(rowsOf(last(r)).map((x) => [x.title, x.description]), [
-    ["Hair – Haircut", "30 min · 3,000 FCFA"],
+    ["Hair – Haircut", "3,000 FCFA"],
     ["Braids", "2 options · from 10,000 FCFA"],
-    ["Manucure", "45 min · 4,000 FCFA"], // no English name set: French name kept
-    ["Consultation", "30 min · price on site"],
+    ["Manucure", "4,000 FCFA"], // no English name set: French name kept
+    ["Consultation", "price on site"],
   ]);
   r = await send(repo, c, tap(ids.group(courtes.id)));
   assertEquals(rowsOf(last(r)).map((x) => x.title), ["Short", "Long"]);
   r = await send(repo, c, tap(ids.time(D(courtes.id), at("2026-11-02 08:00").getTime())));
-  assert(bodyOf(last(r)).includes("• Braids – Short (≈ 3 h)"));
+  assert(bodyOf(last(r)).includes("• Braids – Short\n"));
   assert(bodyOf(last(r)).includes("• Price: from 10,000 FCFA"));
   assert(bodyOf(last(r)).includes("ℹ️ Price depends on the style."));
   r = await send(repo, c, tap(ids.time(D(longues.id), at("2026-11-03 08:00").getTime())));

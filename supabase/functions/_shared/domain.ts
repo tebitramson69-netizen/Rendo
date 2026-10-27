@@ -21,7 +21,11 @@ export interface Business {
   contactPhone: string | null;
   /** Clients served at the same time. */
   chairs: number;
+  /** When the bot shows prices: on_request (default) | always | never. */
+  priceDisplay: PriceDisplay;
 }
+
+export type PriceDisplay = "on_request" | "always" | "never";
 
 /** fixed: "3 000 FCFA" (or nothing if no price) | from: "dès 15 000 FCFA" | on_site: price confirmed on site */
 export type PriceMode = "fixed" | "from" | "on_site";

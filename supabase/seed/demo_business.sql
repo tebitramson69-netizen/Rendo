@@ -6,24 +6,27 @@
 -- allowed-recipient list, because the owner alerts will be sent there.
 -- If you forget, the insert fails on purpose (the owner_whatsapp format check rejects it).
 -- AFTER RUNNING: put OWNER_NUMBER back before committing (never commit your real number).
--- Requires migrations up to 0009 (chairs, style choices).
+-- Requires migrations up to 0011 (chairs, style choices, price display).
 --
 -- Demo salon (M3.6 model): prices depend on the STYLE and the client's CHOICES, not on time.
 --   * Each braid style has a base price ("dès" = from) and questions (Taille, Longueur, Mèches).
 --     Each answer adds to the price and to the time. Example, Knotless:
---     15 000 base + Medium 5 000 + Dos 3 000 + Du salon 4 000 = dès 27 000 FCFA, about 6 h.
+--     7 000 base + Medium 2 000 + Dos 2 000 + Du salon 6 000 = dès 17 000 FCFA (the chair is blocked ~6 h).
 --   * Aliases = words clients type for a style ("sans noeuds"), so "knotless longues" is understood.
 --   * 2 chairs: two clients can be served at the same time.
 --   * Braiders work through lunch: continuous opening hours.
--- Demo figures only: replace them with a real salon's price board before the pilot.
+-- Demo figures only (a mid-range Douala salon, research of 27 Oct 2026: braids with added hair cost
+-- about 3 000-5 000 FCFA in neighbourhood salons, 5 000-10 000 mid-range, 10 000-25 000 upscale; mèches
+-- are sold apart, about 2 000 FCFA a packet). Replace them with the real salon's price board.
+-- What the bot shows is set by businesses.price_display (0011): default 'on_request'.
 
 begin;
 
 insert into public.businesses
   (name, phone_number_id, owner_whatsapp, timezone, default_language,
-   slot_minutes, buffer_minutes, booking_horizon_days, min_notice_minutes, chairs)
+   slot_minutes, buffer_minutes, booking_horizon_days, min_notice_minutes, chairs, price_display)
 values
-  ('Rendo Démo', '1392005827320537', 'OWNER_NUMBER', 'Africa/Douala', 'fr', 30, 10, 10, 120, 2)
+  ('Rendo Démo', '1392005827320537', 'OWNER_NUMBER', 'Africa/Douala', 'fr', 30, 10, 10, 120, 2, 'on_request')
 on conflict (phone_number_id) do update
   set name = excluded.name,
       owner_whatsapp = excluded.owner_whatsapp,
@@ -33,7 +36,8 @@ on conflict (phone_number_id) do update
       buffer_minutes = excluded.buffer_minutes,
       booking_horizon_days = excluded.booking_horizon_days,
       min_notice_minutes = excluded.min_notice_minutes,
-      chairs = excluded.chairs;
+      chairs = excluded.chairs,
+      price_display = excluded.price_display;
 
 -- 1. Styles and services. Names max 24 characters (WhatsApp list rows).
 --    The longest combination must fit inside ONE opening range (Knotless Small + Dos = 7 h).
@@ -44,21 +48,21 @@ select b.id, s.category, s.category_en, s.name, s.name_en, s.minutes, s.price, s
        s.note, s.note_en, s.aliases, s.sort
 from public.businesses b
 cross join (values
-  ('Coiffure', 'Hair', 'Coupe', 'Haircut', 30, 3000, 'fixed', null, null,
+  ('Coiffure', 'Hair', 'Coupe', 'Haircut', 30, 2000, 'fixed', null, null,
      array['coupe', 'couper', 'haircut']::text[], 1),
-  ('Coiffure', 'Hair', 'Brushing', 'Blow-dry', 30, 2500, 'fixed', null, null,
+  ('Coiffure', 'Hair', 'Brushing', 'Blow-dry', 30, 2000, 'fixed', null, null,
      array['brushing', 'blow dry']::text[], 2),
-  ('Tresses', 'Braids', 'Knotless', 'Knotless', 240, 15000, 'from',
+  ('Tresses', 'Braids', 'Knotless', 'Knotless', 240, 7000, 'from',
      'Prix final selon le modèle, confirmé au salon.',
      'Final price depends on the style, confirmed at the salon.',
      array['knotless', 'sans noeuds', 'sans noeud', 'knotless braids']::text[], 3),
-  ('Tresses', 'Braids', 'Box braids', 'Box braids', 180, 12000, 'from',
+  ('Tresses', 'Braids', 'Box braids', 'Box braids', 180, 6000, 'from',
      'Prix final selon le modèle, confirmé au salon.',
      'Final price depends on the style, confirmed at the salon.',
      array['box braids', 'box', 'boxbraids']::text[], 4),
-  ('Tresses', 'Braids', 'Nattes collées', 'Cornrows', 90, 5000, 'from', null, null,
+  ('Tresses', 'Braids', 'Nattes collées', 'Cornrows', 90, 2500, 'from', null, null,
      array['nattes', 'nattes collees', 'cornrows', 'cornrow']::text[], 5),
-  ('', null, 'Manucure', 'Manicure', 45, 4000, 'fixed', null, null,
+  ('', null, 'Manucure', 'Manicure', 45, 2500, 'fixed', null, null,
      array['manucure', 'ongles', 'manicure', 'nails']::text[], 6),
   ('', null, 'Conseil beauté', 'Beauty advice', 30, null, 'on_site',
      'Le prix est fixé sur place selon vos besoins.', 'The price is set at the salon depending on your needs.',
@@ -122,18 +126,18 @@ join public.services s on s.id = g.service_id
 join public.businesses b on b.id = s.business_id and b.phone_number_id = '1392005827320537'
 join (values
   ('Knotless',       'Taille',   'Jumbo',       'Jumbo',         0,   0, 1),
-  ('Knotless',       'Taille',   'Medium',      'Medium',     5000,  60, 2),
-  ('Knotless',       'Taille',   'Small',       'Small',     10000, 120, 3),
+  ('Knotless',       'Taille',   'Medium',      'Medium',     2000,  60, 2),
+  ('Knotless',       'Taille',   'Small',       'Small',      5000, 120, 3),
   ('Knotless',       'Longueur', 'Épaules',     'Shoulder',      0,   0, 1),
-  ('Knotless',       'Longueur', 'Dos',         'Back',       3000,  60, 2),
+  ('Knotless',       'Longueur', 'Dos',         'Back',       2000,  60, 2),
   ('Knotless',       'Mèches',   'Vos mèches',  'Your own hair', 0,   0, 1),
-  ('Knotless',       'Mèches',   'Du salon',    'Salon hair', 4000,   0, 2),
+  ('Knotless',       'Mèches',   'Du salon',    'Salon hair', 6000,   0, 2),
   ('Box braids',     'Taille',   'Medium',      'Medium',        0,   0, 1),
-  ('Box braids',     'Taille',   'Small',       'Small',      6000,  90, 2),
+  ('Box braids',     'Taille',   'Small',       'Small',      3000,  90, 2),
   ('Box braids',     'Mèches',   'Vos mèches',  'Your own hair', 0,   0, 1),
-  ('Box braids',     'Mèches',   'Du salon',    'Salon hair', 3000,   0, 2),
+  ('Box braids',     'Mèches',   'Du salon',    'Salon hair', 6000,   0, 2),
   ('Nattes collées', 'Modèle',   'Simple',      'Simple',        0,   0, 1),
-  ('Nattes collées', 'Modèle',   'Avec motifs', 'Patterned',  2000,  30, 2)
+  ('Nattes collées', 'Modèle',   'Avec motifs', 'Patterned',  1500,  30, 2)
 ) as c(style, grp, name, name_en, price_add, minutes_add, sort) on s.name = c.style and g.name = c.grp
 on conflict (group_id, name) do update
   set name_en = excluded.name_en,
@@ -170,9 +174,10 @@ where b.phone_number_id = '1392005827320537';
 
 commit;
 
--- Check. Expected: Rendo Démo | 2 | 7 | 6 | 13 | 6
+-- Check. Expected: Rendo Démo | 2 | on_request | 7 | 6 | 13 | 6
 select b.name,
        b.chairs,
+       b.price_display,
        (select count(*) from public.services s where s.business_id = b.id and s.active) as active_services,
        (select count(*) from public.service_choice_groups g where g.business_id = b.id) as questions,
        (select count(*) from public.service_choices c where c.business_id = b.id and c.active) as answers,

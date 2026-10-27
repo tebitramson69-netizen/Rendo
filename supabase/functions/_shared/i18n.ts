@@ -148,6 +148,16 @@ export function durationLabel(minutes: number, lang: Lang): string {
   return lang === "fr" ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h ${m} min`;
 }
 
+/** "a, b et c" / "a, b and c". */
+export function joinWords(items: string[], and: string): string {
+  return items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} ${and} ${items[items.length - 1]}`;
+}
+
+/** "Knotless" -> "knotless" inside a sentence; names written in capitals ("IPL", "VIP") stay as they are. */
+export function inSentence(name: string): string {
+  return /^\p{Lu}\p{Ll}/u.test(name) ? name[0].toLocaleLowerCase("fr") + name.slice(1) : name;
+}
+
 // ---------------------------------------------------------------------------
 // Texts
 // ---------------------------------------------------------------------------
@@ -155,13 +165,18 @@ export interface Texts {
   greeting(firstName: string, business: string): string;
   menuQuestion: string;
   askOpen: string;
+  weOffer(items: string[]): string;
+  andMore: string;
+  askWhich: string;
+  priceNever: string;
+  priceAtSalon: string;
   notOffered: string;
   priceListIntro: string;
   chooseStyle: string;
-  priceIntro(style: string, price: string | null, duration: string): string;
+  priceIntro(style: string, price: string | null): string;
   priceDepends: string;
   chooseOption(style: string, group: string): string;
-  optionLine(name: string, price: string | null, duration: string): string;
+  optionLine(name: string, price: string): string;
   partNone(part: "morning" | "afternoon" | "evening"): string;
   timeFree(when: string): string;
   timeTaken(time: string): string;
@@ -198,25 +213,17 @@ export interface Texts {
   chooseTime(service: string, day: string): string;
   listButtonTimes: string;
   sectionTimes: string;
-  endsAround(time: string): string;
   later: string;
   laterDesc: string;
   dayFull(day: string): string;
   // confirm
-  confirmQuestion(
-    service: string,
-    when: string,
-    duration: string,
-    business: string,
-    price: string | null,
-    note: string | null,
-  ): string;
+  confirmQuestion(service: string, when: string, business: string, price: string | null, note: string | null): string;
   btnConfirm: string;
   btnChangeTime: string;
   btnCancelFlow: string;
   slotGone: string;
   // booked
-  booked(service: string, when: string, business: string, code: string, duration: string, price: string | null): string;
+  booked(service: string, when: string, business: string, code: string, price: string | null): string;
   slotTaken: string;
   bookingFailed: string;
   // my appointments
@@ -245,14 +252,20 @@ export const TEXTS: Record<Lang, Texts> = {
   fr: {
     greeting: (n, b) => n ? `Bonjour ${n} 👋 Bienvenue chez ${b}.` : `Bonjour 👋 Bienvenue chez ${b}.`,
     menuQuestion: "Que souhaitez-vous faire ?",
-    askOpen: "Dites-moi ce que vous souhaitez, par exemple « knotless samedi matin », ou choisissez ci-dessous 👇",
+    askOpen: "Dites-moi simplement ce que vous souhaitez, par exemple « knotless samedi matin », ou choisissez ci-dessous 👇",
+    weOffer: (items) => `Chez nous : ${joinWords(items, "et")}.`,
+    andMore: "et plus encore",
+    askWhich:
+      "Qu'est-ce qui vous ferait plaisir ? Écrivez-le simplement, par exemple « knotless samedi matin », ou appuyez sur « Prendre rendez-vous » 👇",
+    priceNever: "Le prix se fixe au salon, selon le modèle 🙂",
+    priceAtSalon: "à convenir au salon",
     notOffered: "Désolé, nous ne proposons pas cette prestation pour le moment 🙂 Voici ce que nous faisons :",
     priceListIntro: "Voici nos prestations et leurs prix 👇",
     chooseStyle: "Laquelle de ces prestations souhaitez-vous ?",
-    priceIntro: (s, p, d) => p ? `${s} : ${p}, environ ${d}.` : `${s} : environ ${d}.`,
+    priceIntro: (s, p) => p ? `${s} : ${p}.` : `${s} : le prix est confirmé au salon.`,
     priceDepends: "Le prix exact dépend de vos choix 👇",
     chooseOption: (s, g) => `${s} — choisissez : ${g}`,
-    optionLine: (n, p, d) => `• ${n} : ${p ? `${p} · ` : ""}≈ ${d}`,
+    optionLine: (n, p) => `• ${n} : ${p}`,
     partNone: (part) =>
       `Plus de créneau libre ${
         part === "morning" ? "le matin" : part === "afternoon" ? "l'après-midi" : "le soir"
@@ -290,19 +303,18 @@ export const TEXTS: Record<Lang, Texts> = {
     chooseTime: (s, d) => `${s} – ${d} : à quelle heure ?`,
     listButtonTimes: "Voir les heures",
     sectionTimes: "Heures disponibles",
-    endsAround: (t) => `Fin vers ${t}`,
     later: "Plus tard…",
     laterDesc: "Voir les heures suivantes",
     dayFull: (d) => `Il n'y a plus de créneau libre ${d}. Choisissez un autre jour :`,
-    confirmQuestion: (s, w, d, b, p, n) =>
-      `Récapitulatif :\n• ${s} (${d})\n• ${w}\n• chez ${b}` + (p ? `\n• Prix : ${p}` : "") +
+    confirmQuestion: (s, w, b, p, n) =>
+      `Récapitulatif :\n• ${s}\n• ${w}\n• chez ${b}` + (p ? `\n• Prix : ${p}` : "") +
       (n ? `\n\nℹ️ ${n}` : "") + "\n\nJe confirme le rendez-vous ?",
     btnConfirm: "Confirmer",
     btnChangeTime: "Changer l'heure",
     btnCancelFlow: "Annuler",
     slotGone: "Ce créneau n'est plus disponible. Voici les heures encore libres :",
-    booked: (s, w, b, c, d, p) =>
-      `✅ Rendez-vous confirmé !\n${s}\n${w} chez ${b} (≈ ${d})` + (p ? `\nPrix : ${p}` : "") +
+    booked: (s, w, b, c, p) =>
+      `✅ Rendez-vous confirmé !\n${s}\n${w} chez ${b}` + (p ? `\nPrix : ${p}` : "") +
       `\nRéférence : ${c}\n\nPour annuler, écrivez ANNULER à tout moment.`,
     slotTaken: "Oups, ce créneau vient d'être pris par quelqu'un d'autre. Voici les heures encore libres :",
     bookingFailed: "Ce rendez-vous n'a pas pu être enregistré. Merci de recommencer.",
@@ -326,14 +338,19 @@ export const TEXTS: Record<Lang, Texts> = {
   en: {
     greeting: (n, b) => n ? `Hello ${n} 👋 Welcome to ${b}.` : `Hello 👋 Welcome to ${b}.`,
     menuQuestion: "What would you like to do?",
-    askOpen: "Tell me what you'd like, for example “knotless Saturday morning”, or choose below 👇",
+    askOpen: "Just tell me what you'd like, for example “knotless Saturday morning”, or choose below 👇",
+    weOffer: (items) => `We offer: ${joinWords(items, "and")}.`,
+    andMore: "and more",
+    askWhich: "What would you like? Just write it, for example “knotless Saturday morning”, or tap “Book appointment” 👇",
+    priceNever: "The price is set at the salon, depending on the style 🙂",
+    priceAtSalon: "agreed at the salon",
     notOffered: "Sorry, we don't offer that service at the moment 🙂 Here is what we do:",
     priceListIntro: "Here are our services and prices 👇",
     chooseStyle: "Which of these services would you like?",
-    priceIntro: (s, p, d) => p ? `${s}: ${p}, about ${d}.` : `${s}: about ${d}.`,
+    priceIntro: (s, p) => p ? `${s}: ${p}.` : `${s}: the price is confirmed at the salon.`,
     priceDepends: "The exact price depends on your choices 👇",
     chooseOption: (s, g) => `${s} — choose: ${g}`,
-    optionLine: (n, p, d) => `• ${n}: ${p ? `${p} · ` : ""}≈ ${d}`,
+    optionLine: (n, p) => `• ${n}: ${p}`,
     partNone: (part) => `No free slot left in the ${part} that day. Here are the other times:`,
     timeFree: (w) => `${w} is free ✅`,
     timeTaken: (h) => `${h} is not available. Here are the free times:`,
@@ -368,19 +385,18 @@ export const TEXTS: Record<Lang, Texts> = {
     chooseTime: (s, d) => `${s} – ${d}: what time?`,
     listButtonTimes: "See times",
     sectionTimes: "Available times",
-    endsAround: (t) => `Ends around ${t}`,
     later: "Later…",
     laterDesc: "See later times",
     dayFull: (d) => `There are no free slots left on ${d}. Please choose another day:`,
-    confirmQuestion: (s, w, d, b, p, n) =>
-      `Summary:\n• ${s} (${d})\n• ${w}\n• at ${b}` + (p ? `\n• Price: ${p}` : "") +
+    confirmQuestion: (s, w, b, p, n) =>
+      `Summary:\n• ${s}\n• ${w}\n• at ${b}` + (p ? `\n• Price: ${p}` : "") +
       (n ? `\n\nℹ️ ${n}` : "") + "\n\nShall I confirm the appointment?",
     btnConfirm: "Confirm",
     btnChangeTime: "Change time",
     btnCancelFlow: "Cancel",
     slotGone: "This slot is no longer available. Here are the times still free:",
-    booked: (s, w, b, c, d, p) =>
-      `✅ Appointment confirmed!\n${s}\n${w} at ${b} (≈ ${d})` + (p ? `\nPrice: ${p}` : "") +
+    booked: (s, w, b, c, p) =>
+      `✅ Appointment confirmed!\n${s}\n${w} at ${b}` + (p ? `\nPrice: ${p}` : "") +
       `\nReference: ${c}\n\nTo cancel, type CANCEL at any time.`,
     slotTaken: "Oops, someone just took this slot. Here are the times still free:",
     bookingFailed: "This appointment could not be saved. Please start again.",

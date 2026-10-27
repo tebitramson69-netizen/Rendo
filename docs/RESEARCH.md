@@ -140,3 +140,35 @@ chairs**, durations shown to clients as "≈".
   what WhatsApp can show: at most 3 questions per style, at most 10 active answers per question.
 - **Demo seed:** Knotless / Box braids / Nattes collées with questions, aliases, 2 chairs, continuous hours
   (braiders work through lunch). Figures are placeholders until a real salon's price board is entered.
+
+## M3.7 talking like a salon (27 Oct 2026) — after the first phone test of M3.6
+
+Feedback from the phone test: long price ladders ("Small : dès 28 000 FCFA · ≈ 7 h") can push local clients
+away, and durations ("≈ 5 h", "Fin vers 14h30") read as inconsistent; clients want to pick the style and a
+time, and to be told naturally what the salon does.
+
+What the research says:
+- **Prices vary enormously by salon level.** A 2026 Cameroonian salon business guide gives, for braids with
+  added hair (service only): ~3 000–5 000 FCFA in neighbourhood salons, 5 000–10 000 mid-range, 10 000–25 000
+  upscale; hair (mèches) is sold apart (~600–2 500 FCFA a packet), and it recommends **showing prices openly**
+  because haggling wears everyone out ([lefisk.cm](https://lefisk.cm/blog/ouvrir-salon-coiffure-cameroun-business-plan-meches-prix-guide-complet)).
+  A premium Yaoundé salon lists knotless at 20 000–40 000 and cornrows at 3 000–10 000, and notes that price
+  is the most divisive question clients ask ([olphega.com](https://olphega.com/blog/guide-tresses-africaines-yaounde)).
+  Synthetic mèches reached ~2 000 FCFA a packet in Yaoundé in 2022 ([Cameroon Tribune](https://www.cameroon-tribune.cm/article.html/51100/fr.html/meches-synthetiques-les-prix-grimpent)).
+- **Unclear price is a top reason clients abandon a booking** (beauty professionals quoted by a booking-software
+  vendor, [PocketSuite](https://pocketsuite.io/post/booking-page-conversion-beauty-business/); no figures given).
+
+Decisions:
+- **Each salon chooses** (`businesses.price_display`, migration 0011). Default `on_request`: no price in the
+  first messages or option buttons, the price when the client asks, and always in the summary before
+  "Confirmer" (no surprise at the salon — the abandonment risk above). `always` for salons that post prices,
+  `never` for salons that agree every price in person.
+- **Durations are never shown** to clients; they stay internal to block the chair.
+- **The greeting says what the salon does** in one sentence built from the live catalogue.
+- **Demo prices lowered** to a mid-range Douala level (Knotless from 7 000, Box braids from 6 000, Nattes
+  collées from 2 500, mèches du salon +6 000). Still placeholders until a real price board is entered.
+- Found and fixed while testing: re-running the seed failed because the 0010 limit triggers ran before
+  `on conflict` (0012); "je veux prendre rendez-vous pour ma fille" was answered "we don't offer that" (the
+  "not offered" reply now needs a question about a named thing); "combines" (autocorrect of "combien") is read
+  as a price question.
+

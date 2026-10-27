@@ -278,6 +278,7 @@ Deno.test({
         assertEquals(knot.aliases, ["knotless", "sans noeuds"]);
         assertEquals(knot.groups.map((g) => [g.name, g.choices.map((c) => c.name)]), [["Taille", ["Jumbo", "Medium"]]]);
         assertEquals((await repo.businessByPhoneNumberId(pnid))!.chairs, 2);
+        assertEquals((await repo.businessByPhoneNumberId(pnid))!.priceDisplay, "on_request"); // 0011 default
 
         const when = new Date(Date.now() + 5 * 86_400_000);
         when.setUTCHours(7, 0, 0, 0); // 08:00 in Douala

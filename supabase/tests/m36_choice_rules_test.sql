@@ -1,4 +1,4 @@
--- Rendo M3.6: checks for migration 0010 (questions without active answers, 3 questions / 10 answers limits).
+-- Rendo M3.6: checks for migrations 0010 + 0012 (questions without active answers, 3 questions / 10 answers limits).
 -- Run the WHOLE file in Supabase -> SQL Editor. It ends with ROLLBACK, so it leaves no data behind.
 -- Expected last line: ALL M3.6 CHOICE RULES TESTS PASSED.
 
@@ -64,6 +64,18 @@ begin
   end;
   update public.service_choices set active = false where id = medium;
   update public.service_choices set active = true where group_id = taille and name = 'Ancienne';  -- back to 10: allowed
+
+  -- R6. (0012) re-saving an EXISTING question or answer with "insert ... on conflict do update" is not
+  --     counted as a new one (re-running the seed, editing the catalogue)
+  insert into public.service_choice_groups (business_id, service_id, name, sort_order)
+  values (biz, knot, 'Taille', 5)
+  on conflict (service_id, name) do update set sort_order = excluded.sort_order;
+  insert into public.service_choices (business_id, group_id, name, price_add_xaf)
+  values (biz, taille, 'Taille 2', 700)
+  on conflict (group_id, name) do update set price_add_xaf = excluded.price_add_xaf;
+  if (select price_add_xaf from public.service_choices where group_id = taille and name = 'Taille 2') <> 700 then
+    raise exception 'R6 FAILED: answer not updated';
+  end if;
 
   -- R5. privileges unchanged: only service_role may book
   if has_function_privilege('anon', 'public.rendo_book_appointment(uuid, uuid, uuid, timestamptz, uuid[])', 'EXECUTE')

@@ -36,6 +36,7 @@ Deno.test("mappers: business row -> Business", () => {
     horizonDays: 10,
     minNoticeMinutes: 120,
     contactPhone: null,
+    priceDisplay: "on_request", // absent before migration 0011 -> default
     chairs: 1, // not in the row (older data): defaults to one chair
   });
 });

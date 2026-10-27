@@ -35,7 +35,7 @@ function fail(operation: string, error: PgError): never {
 }
 
 const BUSINESS_COLUMNS =
-  "id, name, owner_whatsapp, timezone, default_language, slot_minutes, buffer_minutes, booking_horizon_days, min_notice_minutes, contact_phone, chairs";
+  "id, name, owner_whatsapp, timezone, default_language, slot_minutes, buffer_minutes, booking_horizon_days, min_notice_minutes, contact_phone, chairs, price_display";
 const SERVICE_COLUMNS =
   "id, name, name_en, category, category_en, duration_minutes, price_xaf, price_mode, note, note_en, aliases, " +
   "service_choice_groups(id, name, name_en, sort_order, " +

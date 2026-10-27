@@ -11,6 +11,7 @@ import type {
   ContextValue,
   Conversation,
   Lang,
+  PriceDisplay,
   PriceMode,
   Service,
   ServiceChoice,
@@ -68,7 +69,14 @@ export function toBusiness(row: Row): Business {
     minNoticeMinutes: num(row, "min_notice_minutes"),
     contactPhone: strOrNull(row, "contact_phone"),
     chairs: row["chairs"] === undefined ? 1 : num(row, "chairs"),
+    priceDisplay: priceDisplay(row),
   };
+}
+
+function priceDisplay(row: Row): PriceDisplay {
+  const v = row["price_display"] ?? "on_request"; // absent before migration 0011
+  if (v !== "on_request" && v !== "always" && v !== "never") throw new Error("row.price_display: unknown value");
+  return v;
 }
 
 function priceMode(row: Row): PriceMode {
