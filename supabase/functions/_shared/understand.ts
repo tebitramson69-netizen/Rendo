@@ -429,7 +429,9 @@ function meaningsOf(text: string, table: Array<[Meaning, RegExp]>): Set<Meaning>
   const out = new Set<Meaning>();
   for (const [m, re] of table) if (re.test(text)) out.add(m);
   if (out.has("medium_length")) out.delete("long"); // "mi-longues" is not "longues"
-  if (out.has("own_hair")) out.delete("salon_hair"); // "mes propres mèches" contains "meches"
+  // An OWNER's name like "Vos mèches (apportées au salon)" is the client's own hair.
+  // A CLIENT who mentions both ("je n'ai pas mes mèches, vous fournissez") is not guessed: the bot asks.
+  if (table === OWNER_WROTE && out.has("own_hair")) out.delete("salon_hair");
   return out;
 }
 

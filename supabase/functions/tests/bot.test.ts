@@ -20,7 +20,10 @@ const BUSINESS: Business = {
   horizonDays: 10,
   minNoticeMinutes: 120,
   contactPhone: null,
+  chairs: 1,
 };
+
+const D = (sid: string, choices: string[] = []) => ({ sid, choices });
 
 function setup(business: Business = BUSINESS) {
   const repo = new FakeRepo(business);
@@ -85,15 +88,28 @@ const buttonsOf = (m: Outbound) => (m.kind === "buttons" ? m.buttons : []);
 const bodyOf = (m: Outbound) => m.body;
 
 // ---------------------------------------------------------------------------
-Deno.test("bot: first message (any text) greets with the 3-button menu", async () => {
+Deno.test("bot: a first 'hello' greets naturally, invites a free request, and offers 3 buttons", async () => {
+  const { repo } = setup();
+  const c = await client(repo);
+  const r = await send(repo, c, say("Bonsoir"));
+  assertEquals(r.replies.length, 1);
+  assertEquals(
+    bodyOf(r.replies[0]),
+    "Bonjour Marie 👋 Bienvenue chez Rendo Démo.\n\n" +
+      "Dites-moi ce que vous souhaitez, par exemple « knotless samedi matin », ou choisissez ci-dessous 👇",
+  );
+  assertEquals(buttonsOf(r.replies[0]).map((b) => b.id), [ids.book, ids.mine, ids.human]);
+  assertEquals(r.replies[0].kind === "buttons" && r.replies[0].footer, "Reply EN for English");
+  assertEquals(r.conversation.state, "menu");
+});
+
+Deno.test("bot: a first message that already names a service goes straight to it (greeting included)", async () => {
   const { repo } = setup();
   const c = await client(repo);
   const r = await send(repo, c, say("Bonsoir je voudrais une coupe svp"));
   assertEquals(r.replies.length, 1);
-  assert(bodyOf(r.replies[0]).startsWith("Bonjour Marie 👋 Bienvenue chez Rendo Démo."));
-  assertEquals(buttonsOf(r.replies[0]).map((b) => b.id), [ids.book, ids.mine, ids.human]);
-  assertEquals(r.replies[0].kind === "buttons" && r.replies[0].footer, "Reply EN for English");
-  assertEquals(r.conversation.state, "menu");
+  assert(bodyOf(r.replies[0]).startsWith("Bonjour Marie 👋 Bienvenue chez Rendo Démo.\n\nCoupe : quel jour vous arrange ?"));
+  assertEquals(r.conversation.state, "days");
 });
 
 Deno.test("bot: the client's text is never echoed back", async () => {
@@ -166,13 +182,13 @@ Deno.test("bot: a slot taken by someone else is no longer offered, and an old ta
   const start = at("2026-11-02 08:00").getTime();
 
   // both see the confirmation for 8h00
-  await send(repo, a, tap(ids.time(coupe.id, start)));
-  await send(repo, b, tap(ids.time(coupe.id, start)));
+  await send(repo, a, tap(ids.time(D(coupe.id), start)));
+  await send(repo, b, tap(ids.time(D(coupe.id), start)));
   // A confirms first
-  let r = await send(repo, a, tap(ids.confirm(coupe.id, start)));
+  let r = await send(repo, a, tap(ids.confirm(D(coupe.id), start)));
   assert(bodyOf(last(r)).startsWith("✅"));
   // B confirms the same slot with the old button -> told it's gone, shown fresh times without 8h00
-  r = await send(repo, b, tap(ids.confirm(coupe.id, start)));
+  r = await send(repo, b, tap(ids.confirm(D(coupe.id), start)));
   assert(bodyOf(last(r)).startsWith("Ce créneau n'est plus disponible."));
   assert(!rowsOf(last(r)).some((x) => x.title === "8h00" || x.title === "8h30")); // 8h30 is inside A's buffer
   assertEquals(repo.appointments.length, 1);
@@ -183,7 +199,7 @@ Deno.test("bot: losing the race in the database (slot_taken) shows fresh times",
   const { repo, coupe } = setup();
   const c = await client(repo);
   repo.nextBookTaken = true;
-  const r = await send(repo, c, tap(ids.confirm(coupe.id, at("2026-11-02 09:00").getTime())));
+  const r = await send(repo, c, tap(ids.confirm(D(coupe.id), at("2026-11-02 09:00").getTime())));
   assert(bodyOf(last(r)).startsWith("Oups, ce créneau vient d'être pris"));
   assertEquals(last(r).kind, "list");
   assertEquals(r.alerts, []);
@@ -195,7 +211,7 @@ Deno.test("bot: taps that are too soon, outside opening hours or in the past nev
   for (
     const local of ["2026-11-01 13:00", "2026-11-02 12:00", "2026-11-02 07:30", "2026-10-30 10:00", "2026-11-02 08:10"]
   ) {
-    const r = await send(repo, c, tap(ids.confirm(coupe.id, at(local).getTime())));
+    const r = await send(repo, c, tap(ids.confirm(D(coupe.id), at(local).getTime())));
     assert(!bodyOf(r.replies[0]).startsWith("✅"), `booked ${local}`);
   }
   assertEquals(repo.calls.filter((x) => x === "book").length, 0);
@@ -225,7 +241,7 @@ Deno.test("bot: my appointments -> cancel own appointment -> owner alerted; can'
   let r = await send(repo, a, tap(ids.mine));
   assertEquals(bodyOf(last(r)), "Vous n'avez aucun rendez-vous à venir.");
 
-  await send(repo, a, tap(ids.confirm(coupe.id, at("2026-11-03 10:00").getTime())));
+  await send(repo, a, tap(ids.confirm(D(coupe.id), at("2026-11-03 10:00").getTime())));
   r = await send(repo, a, say("ANNULER"));
   const rows = rowsOf(last(r));
   assertEquals(rows.map((x) => [x.title, x.description]), [["Mar. 3 nov. · 10h00", "Coupe · R0001"]]);
@@ -286,6 +302,10 @@ Deno.test("bot: EN / FR switch is saved and the menu changes language", async ()
   r = await send(repo, c, tap(ids.book));
   assertEquals(rowsOf(last(r))[0].description, "30 min · 3,000 FCFA");
   r = await send(repo, c, say("fr"));
+  // the client stays on the same step (the services list), now in French
+  assert(bodyOf(last(r)).startsWith("C'est noté, je vous parle en français."));
+  assertEquals(rowsOf(last(r))[0].description, "30 min · 3 000 FCFA");
+  r = await send(repo, c, tap(ids.menu));
   assertEquals(buttonsOf(last(r))[0].title, "Prendre rendez-vous");
 });
 
@@ -293,7 +313,7 @@ Deno.test("bot: unknown text inside a step repeats the step; the 3rd time offers
   const { repo, coupe } = setup();
   const c = await client(repo);
   await send(repo, c, tap(ids.service(coupe.id)));
-  let r = await send(repo, c, say("demain matin ?"));
+  let r = await send(repo, c, say("euh je sais pas trop"));
   assertEquals(r.replies.length, 2);
   assert(bodyOf(r.replies[0]).startsWith("Je n'ai pas compris"));
   assertEquals(r.conversation.state, "days"); // same step shown again
@@ -346,7 +366,7 @@ Deno.test("bot: keyword recognition ignores case, accents and punctuation", () =
   assertEquals(intentOf("Français"), "lang_fr");
   assertEquals(intentOf("je veux annuler mon rdv de demain"), "mine"); // "annul…" wins over "rdv"
   assertEquals(intentOf("je veux un rdv pour samedi"), "book");
-  assertEquals(intentOf("Bonsoir je voudrais une coupe svp"), "unknown");
+  assertEquals(intentOf("Bonsoir je voudrais une coupe svp"), "menu"); // starts with a greeting
   assertEquals(intentOf("I want to cancel"), "mine");
 });
 
@@ -423,21 +443,21 @@ Deno.test("catalogue: categories first, then variants with their own duration an
   // a 4-hour braid only fits a full 4-hour opening range (Mon 08:00-12:00 or 14:00-18:00)
   r = await send(repo, c, tap(ids.service(longues.id)));
   assertEquals(bodyOf(last(r)), "Tresses – Longues : quel jour vous arrange ?");
-  r = await send(repo, c, tap(ids.day(longues.id, "2026-11-02")));
+  r = await send(repo, c, tap(ids.day(D(longues.id), "2026-11-02")));
   assertEquals(rowsOf(last(r)).map((x) => [x.title, x.description]), [["8h00", "Fin vers 12h00"], [
     "14h00",
     "Fin vers 18h00",
   ]]);
 
   // summary: full name, "à partir de" price, and the business's note
-  r = await send(repo, c, tap(ids.time(longues.id, at("2026-11-02 08:00").getTime())));
+  r = await send(repo, c, tap(ids.time(D(longues.id), at("2026-11-02 08:00").getTime())));
   const body = bodyOf(last(r));
-  assert(body.includes("• Tresses – Longues (4 h)"));
+  assert(body.includes("• Tresses – Longues (≈ 4 h)"));
   assert(body.includes("• Prix : à partir de 18 000 FCFA"));
   assert(body.includes("ℹ️ Prix selon la longueur."));
 
   // booked: the calendar blocks the real 4 hours, and the owner sees the full French name
-  r = await send(repo, c, tap(ids.confirm(longues.id, at("2026-11-02 08:00").getTime())));
+  r = await send(repo, c, tap(ids.confirm(D(longues.id), at("2026-11-02 08:00").getTime())));
   assertEquals(repo.appointments[0].end.toISOString(), at("2026-11-02 12:00").toISOString());
   assertEquals(r.alerts[0].params[1], "Tresses – Longues");
 });
@@ -445,7 +465,7 @@ Deno.test("catalogue: categories first, then variants with their own duration an
 Deno.test("catalogue: clinic-style service with the price confirmed on site", async () => {
   const { repo, conseil } = salon();
   const c = await client(repo);
-  const r = await send(repo, c, tap(ids.time(conseil.id, at("2026-11-02 09:00").getTime())));
+  const r = await send(repo, c, tap(ids.time(D(conseil.id), at("2026-11-02 09:00").getTime())));
   assert(bodyOf(last(r)).includes("• Prix : confirmé sur place"));
   assert(!bodyOf(last(r)).includes("FCFA"));
 });
@@ -463,11 +483,11 @@ Deno.test("catalogue: English client sees English names, categories, prices and 
   ]);
   r = await send(repo, c, tap(ids.group(courtes.id)));
   assertEquals(rowsOf(last(r)).map((x) => x.title), ["Short", "Long"]);
-  r = await send(repo, c, tap(ids.time(courtes.id, at("2026-11-02 08:00").getTime())));
-  assert(bodyOf(last(r)).includes("• Braids – Short (3 h)"));
+  r = await send(repo, c, tap(ids.time(D(courtes.id), at("2026-11-02 08:00").getTime())));
+  assert(bodyOf(last(r)).includes("• Braids – Short (≈ 3 h)"));
   assert(bodyOf(last(r)).includes("• Price: from 10,000 FCFA"));
   assert(bodyOf(last(r)).includes("ℹ️ Price depends on the style."));
-  r = await send(repo, c, tap(ids.time(longues.id, at("2026-11-03 08:00").getTime())));
+  r = await send(repo, c, tap(ids.time(D(longues.id), at("2026-11-03 08:00").getTime())));
   assert(bodyOf(last(r)).includes("ℹ️ Prix selon la longueur.")); // no English note: French one shown
 });
 
@@ -502,7 +522,7 @@ Deno.test("greetings: a new client saying 'Good morning' gets English; 'Hello' s
 Deno.test("greetings: 'Ok' / 'Merci' after a booking gets a short reply, not the whole menu again", async () => {
   const { repo, coupe } = setup();
   const c = await client(repo);
-  await send(repo, c, tap(ids.confirm(coupe.id, at("2026-11-02 09:00").getTime())));
+  await send(repo, c, tap(ids.confirm(D(coupe.id), at("2026-11-02 09:00").getTime())));
   const r = await send(repo, c, say("Ok"));
   assertEquals(r.replies, [{ kind: "text", body: "Avec plaisir 🙂 Écrivez MENU à tout moment pour revenir au menu." }]);
   const first = await client(repo, "237690000007", "Nouveau");

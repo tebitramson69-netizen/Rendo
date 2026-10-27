@@ -28,13 +28,20 @@ export interface Interval {
   end: Date; // exclusive
 }
 
+/** An existing appointment: [starts_at, blocked_until) on one chair. */
+export interface BusyInterval extends Interval {
+  chair?: number; // 1 when not given (salons with a single chair, or data from before chairs existed)
+}
+
 export interface AvailabilityInput {
   rules: BusinessRules;
   serviceMinutes: number;
   openingHours: OpeningRange[];
   closures: Interval[];
   /** Active appointments as [starts_at, blocked_until). Cancelled ones must not be passed. */
-  busy: Interval[];
+  busy: BusyInterval[];
+  /** Clients served at the same time (default 1). A slot is free if at least ONE chair is free for all of it. */
+  chairs?: number;
   now: Date;
 }
 
@@ -49,6 +56,7 @@ const MINUTE = 60_000;
 
 export function availableSlots(input: AvailabilityInput): Slot[] {
   const { rules, serviceMinutes, openingHours, closures, busy, now } = input;
+  const chairs = Math.max(1, Math.floor(input.chairs ?? 1));
   if (
     !(serviceMinutes > 0) || !(rules.slotMinutes > 0) || !(rules.horizonDays > 0) ||
     rules.bufferMinutes < 0 || rules.minNoticeMinutes < 0
@@ -82,7 +90,14 @@ export function availableSlots(input: AvailabilityInput): Slot[] {
         const end = s + serviceMinutes * MINUTE;
         const blockedUntil = end + rules.bufferMinutes * MINUTE;
         if (closures.some((c) => s < c.end.getTime() && end > c.start.getTime())) continue;
-        if (busy.some((b) => s < b.end.getTime() && blockedUntil > b.start.getTime())) continue;
+        // The database rule is per chair: the slot is free if some chair has no overlapping appointment.
+        let freeChair = false;
+        for (let chair = 1; chair <= chairs && !freeChair; chair++) {
+          freeChair = !busy.some((b) =>
+            (b.chair ?? 1) === chair && s < b.end.getTime() && blockedUntil > b.start.getTime()
+          );
+        }
+        if (!freeChair) continue;
 
         seen.add(s);
         slots.push({

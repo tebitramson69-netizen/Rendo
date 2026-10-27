@@ -23,6 +23,9 @@ interface Appt {
   start: Date;
   end: Date;
   blockedUntil: Date;
+  chair: number;
+  choiceIds: string[];
+  estimateXaf: number | null;
   status: "confirmed" | "cancelled";
 }
 
@@ -41,6 +44,8 @@ export function svc(
     priceMode: "fixed",
     note: null,
     noteEn: null,
+    aliases: [],
+    groups: [],
     active: true,
     ...fields,
   };
@@ -79,7 +84,7 @@ export class FakeRepo implements Repo {
       closures: [],
       busy: this.appointments
         .filter((a) => a.businessId === businessId && a.status !== "cancelled" && a.blockedUntil > from && a.start < to)
-        .map((a) => ({ start: a.start, end: a.blockedUntil })),
+        .map((a) => ({ start: a.start, end: a.blockedUntil, chair: a.chair })),
     });
   }
 
@@ -133,19 +138,35 @@ export class FakeRepo implements Repo {
     return Promise.resolve("saved");
   }
 
-  book(businessId: string, clientId: string, serviceId: string, startsAt: Date): Promise<BookResult> {
+  /** Same rules as rendo_book_appointment(): one choice per group, chairs, estimate = base + additions. */
+  book(businessId: string, clientId: string, serviceId: string, startsAt: Date, choiceIds: string[]): Promise<BookResult> {
     this.calls.push("book");
     const svc = this.services.find((s) => s.id === serviceId && s.businessId === businessId && s.active);
     if (!svc) return Promise.resolve({ status: "invalid", reason: "service_unavailable" });
-    const end = new Date(startsAt.getTime() + svc.durationMinutes * 60_000);
+    const chosen = choiceIds.map((id) => svc.groups.flatMap((g) => g.choices.map((c) => ({ g, c }))).find((x) => x.c.id === id));
+    const groupsUsed = new Set(chosen.map((x) => x?.g.id));
+    if (chosen.some((x) => !x) || groupsUsed.size !== chosen.length || chosen.length !== svc.groups.length) {
+      return Promise.resolve({ status: "invalid", reason: "choices_invalid" });
+    }
+    const minutes = svc.durationMinutes + chosen.reduce((m, x) => m + x!.c.durationAddMinutes, 0);
+    const estimateXaf = svc.priceXaf === null || svc.priceMode === "on_site"
+      ? null
+      : Math.max(0, svc.priceXaf + chosen.reduce((p, x) => p + x!.c.priceAddXaf, 0));
+    const end = new Date(startsAt.getTime() + minutes * 60_000);
     const blockedUntil = new Date(end.getTime() + this.business.bufferMinutes * 60_000);
-    const overlap = this.appointments.some((a) =>
-      a.businessId === businessId && a.status !== "cancelled" && startsAt < a.blockedUntil && blockedUntil > a.start
-    );
-    if (overlap || this.nextBookTaken) {
+    if (this.nextBookTaken) {
       this.nextBookTaken = false;
       return Promise.resolve({ status: "slot_taken" });
     }
+    let chair = 0;
+    for (let c = 1; c <= this.business.chairs && !chair; c++) {
+      const overlap = this.appointments.some((a) =>
+        a.businessId === businessId && a.chair === c && a.status !== "cancelled" &&
+        startsAt < a.blockedUntil && blockedUntil > a.start
+      );
+      if (!overlap) chair = c;
+    }
+    if (!chair) return Promise.resolve({ status: "slot_taken" });
     const appt: Appt = {
       id: uuid(),
       businessId,
@@ -155,10 +176,20 @@ export class FakeRepo implements Repo {
       start: startsAt,
       end,
       blockedUntil,
+      chair,
+      choiceIds,
+      estimateXaf,
       status: "confirmed",
     };
     this.appointments.push(appt);
-    return Promise.resolve({ status: "booked", appointmentId: appt.id, bookingCode: appt.code, startsAt, endsAt: end });
+    return Promise.resolve({
+      status: "booked",
+      appointmentId: appt.id,
+      bookingCode: appt.code,
+      startsAt,
+      endsAt: end,
+      estimateXaf,
+    });
   }
 
   upcomingForClient(clientId: string, now: Date): Promise<UpcomingAppointment[]> {
@@ -171,6 +202,10 @@ export class FakeRepo implements Repo {
           bookingCode: a.code,
           service: (({ name, nameEn, category, categoryEn }) => ({ name, nameEn, category, categoryEn }))(
             this.services.find((s) => s.id === a.serviceId)!,
+          ),
+          serviceId: a.serviceId,
+          choiceNames: a.choiceIds.map((id) =>
+            this.services.flatMap((s) => s.groups.flatMap((g) => g.choices)).find((c) => c.id === id)?.name ?? ""
           ),
           startsAt: a.start,
         })),

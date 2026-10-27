@@ -2,15 +2,18 @@
 // Pure functions with no imports to download, so they are unit-tested offline.
 // They are strict on purpose: a row that doesn't look right throws instead of silently
 // producing a half-filled object that would cause a wrong booking later.
+import type { BusyInterval } from "./availability.ts";
 import type {
   BookResult,
   Business,
+  ChoiceGroup,
   Client,
   ContextValue,
   Conversation,
   Lang,
   PriceMode,
   Service,
+  ServiceChoice,
   ServiceLabel,
   UpcomingAppointment,
 } from "./domain.ts";
@@ -64,6 +67,7 @@ export function toBusiness(row: Row): Business {
     horizonDays: num(row, "booking_horizon_days"),
     minNoticeMinutes: num(row, "min_notice_minutes"),
     contactPhone: strOrNull(row, "contact_phone"),
+    chairs: row["chairs"] === undefined ? 1 : num(row, "chairs"),
   };
 }
 
@@ -82,8 +86,37 @@ export function toServiceLabel(row: Row): ServiceLabel {
   };
 }
 
+const bySortThenName = (a: Row, b: Row) =>
+  (Number(a["sort_order"] ?? 0) - Number(b["sort_order"] ?? 0)) ||
+  String(a["name"] ?? "").localeCompare(String(b["name"] ?? ""));
+
+export function toChoice(row: Row): ServiceChoice {
+  return {
+    id: str(row, "id"),
+    name: str(row, "name"),
+    nameEn: strOrNull(row, "name_en"),
+    priceAddXaf: num(row, "price_add_xaf"),
+    durationAddMinutes: num(row, "duration_add_minutes"),
+  };
+}
+
+/** Groups embedded by PostgREST (service_choice_groups -> service_choices); inactive choices dropped. */
+export function toGroups(value: unknown): ChoiceGroup[] {
+  if (!Array.isArray(value)) return [];
+  return (value as Row[]).slice().sort(bySortThenName).map((g) => ({
+    id: str(g, "id"),
+    name: str(g, "name"),
+    nameEn: strOrNull(g, "name_en"),
+    choices: (Array.isArray(g["service_choices"]) ? g["service_choices"] as Row[] : [])
+      .filter((c) => c["active"] !== false)
+      .sort(bySortThenName)
+      .map(toChoice),
+  })).filter((g) => g.choices.length > 0); // a group without any option can't be answered: ignore it
+}
+
 export function toService(row: Row): Service {
   const price = row["price_xaf"];
+  const aliases = row["aliases"];
   return {
     id: str(row, "id"),
     ...toServiceLabel(row),
@@ -92,7 +125,13 @@ export function toService(row: Row): Service {
     priceMode: priceMode(row),
     note: strOrNull(row, "note"),
     noteEn: strOrNull(row, "note_en"),
+    aliases: Array.isArray(aliases) ? aliases.filter((a): a is string => typeof a === "string") : [],
+    groups: toGroups(row["service_choice_groups"]),
   };
+}
+
+export function toBusy(row: Row): BusyInterval {
+  return { ...toInterval(row, "starts_at", "blocked_until"), chair: row["chair"] === undefined ? 1 : num(row, "chair") };
 }
 
 export function toClient(row: Row): Client {
@@ -159,6 +198,7 @@ export function toInterval(row: Row, startKey: string, endKey: string) {
 export function toUpcoming(row: Row): UpcomingAppointment {
   // PostgREST returns the embedded service as an object (one service per appointment)
   const service = row["services"] as Row | null | undefined;
+  const choices = Array.isArray(row["choices"]) ? row["choices"] as Row[] : [];
   return {
     id: str(row, "id"),
     bookingCode: str(row, "booking_code"),
@@ -166,6 +206,8 @@ export function toUpcoming(row: Row): UpcomingAppointment {
       ? toServiceLabel(service)
       : { name: "", nameEn: null, category: "", categoryEn: null },
     startsAt: date(row, "starts_at"),
+    serviceId: typeof row["service_id"] === "string" ? row["service_id"] : "",
+    choiceNames: choices.map((c) => c["choice"]).filter((n): n is string => typeof n === "string"),
   };
 }
 
@@ -180,6 +222,7 @@ export function toBookResult(value: unknown): BookResult {
         bookingCode: str(row, "booking_code"),
         startsAt: date(row, "starts_at"),
         endsAt: date(row, "ends_at"),
+        estimateXaf: typeof row["estimate_xaf"] === "number" ? row["estimate_xaf"] : null,
       };
     case "slot_taken":
       return { status: "slot_taken" };

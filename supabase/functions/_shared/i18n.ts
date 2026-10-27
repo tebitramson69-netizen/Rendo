@@ -154,6 +154,22 @@ export function durationLabel(minutes: number, lang: Lang): string {
 export interface Texts {
   greeting(firstName: string, business: string): string;
   menuQuestion: string;
+  askOpen: string;
+  notOffered: string;
+  priceListIntro: string;
+  chooseStyle: string;
+  priceIntro(style: string, price: string | null, duration: string): string;
+  priceDepends: string;
+  chooseOption(style: string, group: string): string;
+  optionLine(name: string, price: string | null, duration: string): string;
+  partNone(part: "morning" | "afternoon" | "evening"): string;
+  timeFree(when: string): string;
+  timeTaken(time: string): string;
+  alreadyBooked(code: string): string;
+  tooMany(n: number): string;
+  reschedulePrefix: string;
+  moreServices: string;
+  moreServicesDesc: string;
   didNotUnderstand: string;
   offerHuman: string;
   menuFooter: string;
@@ -200,7 +216,7 @@ export interface Texts {
   btnCancelFlow: string;
   slotGone: string;
   // booked
-  booked(service: string, when: string, business: string, code: string): string;
+  booked(service: string, when: string, business: string, code: string, duration: string, price: string | null): string;
   slotTaken: string;
   bookingFailed: string;
   // my appointments
@@ -229,6 +245,26 @@ export const TEXTS: Record<Lang, Texts> = {
   fr: {
     greeting: (n, b) => n ? `Bonjour ${n} 👋 Bienvenue chez ${b}.` : `Bonjour 👋 Bienvenue chez ${b}.`,
     menuQuestion: "Que souhaitez-vous faire ?",
+    askOpen: "Dites-moi ce que vous souhaitez, par exemple « knotless samedi matin », ou choisissez ci-dessous 👇",
+    notOffered: "Désolé, nous ne proposons pas cette prestation pour le moment 🙂 Voici ce que nous faisons :",
+    priceListIntro: "Voici nos prestations et leurs prix 👇",
+    chooseStyle: "Laquelle de ces prestations souhaitez-vous ?",
+    priceIntro: (s, p, d) => p ? `${s} : ${p}, environ ${d}.` : `${s} : environ ${d}.`,
+    priceDepends: "Le prix exact dépend de vos choix 👇",
+    chooseOption: (s, g) => `${s} — choisissez : ${g}`,
+    optionLine: (n, p, d) => `• ${n} : ${p ? `${p} · ` : ""}≈ ${d}`,
+    partNone: (part) =>
+      `Plus de créneau libre ${
+        part === "morning" ? "le matin" : part === "afternoon" ? "l'après-midi" : "le soir"
+      } ce jour-là. Voici les autres heures :`,
+    timeFree: (w) => `${w} est libre ✅`,
+    timeTaken: (h) => `${h} n'est pas disponible. Voici les heures libres :`,
+    alreadyBooked: (c) => `Ce rendez-vous est déjà confirmé ✅ (référence ${c}).`,
+    tooMany: (n) =>
+      `Vous avez déjà ${n} rendez-vous à venir. Pour en prendre un autre, annulez-en un d'abord (écrivez ANNULER).`,
+    reschedulePrefix: "Pour changer la date : choisissez le rendez-vous, annulez-le, puis prenez un nouveau créneau.",
+    moreServices: "Plus de prestations…",
+    moreServicesDesc: "Voir la suite de la liste",
     didNotUnderstand: "Je n'ai pas compris 🙂 Merci d'utiliser les boutons ci-dessous.",
     offerHuman: "Vous pouvez aussi appuyer sur « Parler à quelqu'un ».",
     menuFooter: "Reply EN for English",
@@ -265,9 +301,9 @@ export const TEXTS: Record<Lang, Texts> = {
     btnChangeTime: "Changer l'heure",
     btnCancelFlow: "Annuler",
     slotGone: "Ce créneau n'est plus disponible. Voici les heures encore libres :",
-    booked: (s, w, b, c) =>
-      `✅ Rendez-vous confirmé !\n${s} – ${w} chez ${b}.\nRéférence : ${c}\n\n` +
-      "Pour annuler, écrivez ANNULER à tout moment.",
+    booked: (s, w, b, c, d, p) =>
+      `✅ Rendez-vous confirmé !\n${s}\n${w} chez ${b} (≈ ${d})` + (p ? `\nPrix : ${p}` : "") +
+      `\nRéférence : ${c}\n\nPour annuler, écrivez ANNULER à tout moment.`,
     slotTaken: "Oups, ce créneau vient d'être pris par quelqu'un d'autre. Voici les heures encore libres :",
     bookingFailed: "Ce rendez-vous n'a pas pu être enregistré. Merci de recommencer.",
     noUpcoming: "Vous n'avez aucun rendez-vous à venir.",
@@ -290,6 +326,23 @@ export const TEXTS: Record<Lang, Texts> = {
   en: {
     greeting: (n, b) => n ? `Hello ${n} 👋 Welcome to ${b}.` : `Hello 👋 Welcome to ${b}.`,
     menuQuestion: "What would you like to do?",
+    askOpen: "Tell me what you'd like, for example “knotless Saturday morning”, or choose below 👇",
+    notOffered: "Sorry, we don't offer that service at the moment 🙂 Here is what we do:",
+    priceListIntro: "Here are our services and prices 👇",
+    chooseStyle: "Which of these services would you like?",
+    priceIntro: (s, p, d) => p ? `${s}: ${p}, about ${d}.` : `${s}: about ${d}.`,
+    priceDepends: "The exact price depends on your choices 👇",
+    chooseOption: (s, g) => `${s} — choose: ${g}`,
+    optionLine: (n, p, d) => `• ${n}: ${p ? `${p} · ` : ""}≈ ${d}`,
+    partNone: (part) => `No free slot left in the ${part} that day. Here are the other times:`,
+    timeFree: (w) => `${w} is free ✅`,
+    timeTaken: (h) => `${h} is not available. Here are the free times:`,
+    alreadyBooked: (c) => `This appointment is already confirmed ✅ (reference ${c}).`,
+    tooMany: (n) =>
+      `You already have ${n} upcoming appointments. To book another one, please cancel one first (type CANCEL).`,
+    reschedulePrefix: "To change the date: choose the appointment, cancel it, then pick a new slot.",
+    moreServices: "More services…",
+    moreServicesDesc: "See the rest of the list",
     didNotUnderstand: "Sorry, I didn't understand 🙂 Please use the buttons below.",
     offerHuman: "You can also tap “Talk to someone”.",
     menuFooter: "Écrivez FR pour le français",
@@ -326,9 +379,9 @@ export const TEXTS: Record<Lang, Texts> = {
     btnChangeTime: "Change time",
     btnCancelFlow: "Cancel",
     slotGone: "This slot is no longer available. Here are the times still free:",
-    booked: (s, w, b, c) =>
-      `✅ Appointment confirmed!\n${s} – ${w} at ${b}.\nReference: ${c}\n\n` +
-      "To cancel, type CANCEL at any time.",
+    booked: (s, w, b, c, d, p) =>
+      `✅ Appointment confirmed!\n${s}\n${w} at ${b} (≈ ${d})` + (p ? `\nPrice: ${p}` : "") +
+      `\nReference: ${c}\n\nTo cancel, type CANCEL at any time.`,
     slotTaken: "Oops, someone just took this slot. Here are the times still free:",
     bookingFailed: "This appointment could not be saved. Please start again.",
     noUpcoming: "You have no upcoming appointments.",

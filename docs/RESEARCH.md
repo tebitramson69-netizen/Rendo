@@ -128,4 +128,15 @@ chairs**, durations shown to clients as "≈".
 - **Understanding typed requests:** a deterministic matcher (style names + owner-defined aliases + FR/EN words
   for days, times, length, mèches) answers with real catalogue prices and real availability, and asks only for
   what is missing. An AI extractor can later plug into the same interface; replies stay templated so prices and
-  slots are never invented. Message text is still never stored; only counts of understood / missed messages.
+  slots are never invented. Message text is still never stored (counting understood / missed messages, to
+  improve the matcher, is a later step).
+- **The conversation (task 3, 25 Oct 2026):** a typed request like "knotless longues avec mes mèches samedi
+  matin" is answered in one message with the real "dès" price for what is known so far, then only the missing
+  question is asked (buttons, or a list when a question has more than 3 answers). A client who mentions both
+  "my own hair" and "salon hair" is asked, not guessed. Protections: at most 3 upcoming appointments per
+  client, a repeated Confirm is not a second booking, every tap id is re-checked against the current catalogue.
+- **Migration 0010 (choice rules):** a question whose answers are all switched off is skipped by the bot AND
+  by the booking function (before, every booking of that style would have failed). The database also enforces
+  what WhatsApp can show: at most 3 questions per style, at most 10 active answers per question.
+- **Demo seed:** Knotless / Box braids / Nattes collées with questions, aliases, 2 chairs, continuous hours
+  (braiders work through lunch). Figures are placeholders until a real salon's price board is entered.

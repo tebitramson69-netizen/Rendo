@@ -19,6 +19,7 @@ import {
   conversationColumns,
   toBookResult,
   toBusiness,
+  toBusy,
   toClient,
   toConversation,
   toInterval,
@@ -34,9 +35,11 @@ function fail(operation: string, error: PgError): never {
 }
 
 const BUSINESS_COLUMNS =
-  "id, name, owner_whatsapp, timezone, default_language, slot_minutes, buffer_minutes, booking_horizon_days, min_notice_minutes, contact_phone";
+  "id, name, owner_whatsapp, timezone, default_language, slot_minutes, buffer_minutes, booking_horizon_days, min_notice_minutes, contact_phone, chairs";
 const SERVICE_COLUMNS =
-  "id, name, name_en, category, category_en, duration_minutes, price_xaf, price_mode, note, note_en";
+  "id, name, name_en, category, category_en, duration_minutes, price_xaf, price_mode, note, note_en, aliases, " +
+  "service_choice_groups(id, name, name_en, sort_order, " +
+  "service_choices(id, name, name_en, price_add_xaf, duration_add_minutes, sort_order, active))";
 const CONVERSATION_COLUMNS =
   "client_id, business_id, state, context, expires_at, paused_until, last_inbound_at, handoff_requested_at, version";
 
@@ -56,7 +59,8 @@ export class SupabaseRepo implements Repo {
       .eq("business_id", businessId).eq("active", true)
       .order("sort_order").order("name");
     if (error) fail("activeServices", error);
-    return (data ?? []).map(toService);
+    // the select string is built from parts, so supabase-js cannot type the rows: map them ourselves
+    return ((data ?? []) as unknown as Record<string, unknown>[]).map(toService);
   }
 
   async availabilityData(businessId: string, from: Date, to: Date): Promise<AvailabilityData> {
@@ -67,7 +71,7 @@ export class SupabaseRepo implements Repo {
       this.db.from("closures").select("starts_at, ends_at")
         .eq("business_id", businessId).gt("ends_at", fromIso).lt("starts_at", toIso),
       // blocked_until (not starts_at) so an appointment that began before `from` still counts
-      this.db.from("appointments").select("starts_at, blocked_until")
+      this.db.from("appointments").select("starts_at, blocked_until, chair")
         .eq("business_id", businessId).neq("status", "cancelled")
         .gt("blocked_until", fromIso).lt("starts_at", toIso),
     ]);
@@ -77,7 +81,7 @@ export class SupabaseRepo implements Repo {
     return {
       openingHours: (hours.data ?? []).map(toOpeningRange),
       closures: (closures.data ?? []).map((r) => toInterval(r, "starts_at", "ends_at")),
-      busy: (busy.data ?? []).map((r) => toInterval(r, "starts_at", "blocked_until")),
+      busy: (busy.data ?? []).map(toBusy),
     };
   }
 
@@ -134,12 +138,19 @@ export class SupabaseRepo implements Repo {
     return data && data.length === 1 ? "saved" : "conflict";
   }
 
-  async book(businessId: string, clientId: string, serviceId: string, startsAt: Date): Promise<BookResult> {
+  async book(
+    businessId: string,
+    clientId: string,
+    serviceId: string,
+    startsAt: Date,
+    choiceIds: string[],
+  ): Promise<BookResult> {
     const { data, error } = await this.db.rpc("rendo_book_appointment", {
       p_business_id: businessId,
       p_client_id: clientId,
       p_service_id: serviceId,
       p_starts_at: startsAt.toISOString(),
+      p_choice_ids: choiceIds,
     });
     if (error) fail("book", error);
     return toBookResult(data);
@@ -147,7 +158,7 @@ export class SupabaseRepo implements Repo {
 
   async upcomingForClient(clientId: string, now: Date): Promise<UpcomingAppointment[]> {
     const { data, error } = await this.db.from("appointments")
-      .select("id, booking_code, starts_at, services(name, name_en, category, category_en)")
+      .select("id, booking_code, starts_at, service_id, choices, services(name, name_en, category, category_en)")
       .eq("client_id", clientId).eq("status", "confirmed").gt("starts_at", now.toISOString())
       .order("starts_at").limit(10);
     if (error) fail("upcomingForClient", error);

@@ -128,7 +128,7 @@ Deno.test({
         assert(before.length > 0, "no slots offered");
         firstSlot = before[0].start;
 
-        const r = await repo.book(businessId, client.id, coupe.id, firstSlot);
+        const r = await repo.book(businessId, client.id, coupe.id, firstSlot, []);
         assert(r.status === "booked", `book: ${JSON.stringify(r)}`);
         assert(/^R\d{4}$/.test(r.bookingCode));
 
@@ -136,7 +136,7 @@ Deno.test({
         assert(!after.some((s) => s.start.getTime() === firstSlot.getTime()), "booked slot still offered");
         assertEquals((await repo.availabilityData(businessId, now, horizonEnd)).busy.length, 1);
 
-        assertEquals(await repo.book(businessId, client.id, coupe.id, firstSlot), { status: "slot_taken" });
+        assertEquals(await repo.book(businessId, client.id, coupe.id, firstSlot, []), { status: "slot_taken" });
       });
 
       await t.step("upcoming -> cancel -> slot free again", async () => {
@@ -254,6 +254,46 @@ Deno.test({
         await post(tapId(confirm.buttons[0].id));
         assert(sent.at(-1)!.body.startsWith("✅"), sent.at(-1)!.body);
         assertEquals(alerts, ["rendo_nouveau_rdv"]);
+      });
+      await t.step("style with choices + 2 chairs through the real database (embedded select, estimate, chairs)", async () => {
+        await db.from("businesses").update({ chairs: 2 }).eq("id", businessId);
+        const sv = await db.from("services").insert({
+          business_id: businessId, category: "Tresses", name: "Knotless", duration_minutes: 240, price_xaf: 15000,
+          price_mode: "from", aliases: ["knotless", "sans noeuds"],
+        }).select("id").single();
+        assert(!sv.error && sv.data, `service setup ${sv.error?.code}`);
+        const sid = sv.data.id as string;
+        const grp = await db.from("service_choice_groups")
+          .insert({ business_id: businessId, service_id: sid, name: "Taille", sort_order: 1 }).select("id").single();
+        assert(!grp.error && grp.data, `group setup ${grp.error?.code}`);
+        const ch = await db.from("service_choices").insert([
+          { business_id: businessId, group_id: grp.data.id, name: "Jumbo", price_add_xaf: 0, duration_add_minutes: 0, sort_order: 1, active: true },
+          { business_id: businessId, group_id: grp.data.id, name: "Medium", price_add_xaf: 5000, duration_add_minutes: 60, sort_order: 2, active: true },
+          { business_id: businessId, group_id: grp.data.id, name: "Vieux", price_add_xaf: 1, duration_add_minutes: 0, sort_order: 3, active: false },
+        ]).select("id, name");
+        assert(!ch.error && ch.data, `choices setup ${ch.error?.code}`);
+        const medium = ch.data.find((c) => c.name === "Medium")!.id as string;
+
+        const knot = (await repo.activeServices(businessId)).find((s) => s.id === sid)!;
+        assertEquals(knot.aliases, ["knotless", "sans noeuds"]);
+        assertEquals(knot.groups.map((g) => [g.name, g.choices.map((c) => c.name)]), [["Taille", ["Jumbo", "Medium"]]]);
+        assertEquals((await repo.businessByPhoneNumberId(pnid))!.chairs, 2);
+
+        const when = new Date(Date.now() + 5 * 86_400_000);
+        when.setUTCHours(7, 0, 0, 0); // 08:00 in Douala
+        const a = await repo.book(businessId, client.id, sid, when, [medium]);
+        assert(a.status === "booked", JSON.stringify(a));
+        assertEquals(a.estimateXaf, 20000);
+        assertEquals(a.endsAt.getTime() - when.getTime(), 5 * 3600_000);
+        const other = await repo.upsertClient(businessId, { waUserId: "BSUID.IT.CH2" });
+        const b = await repo.book(businessId, other.id, coupe.id, new Date(when.getTime() + 3600_000), []);
+        assert(b.status === "booked", "second chair should take a parallel booking");
+        const busy = (await repo.availabilityData(businessId, new Date(), new Date(when.getTime() + 86_400_000))).busy;
+        // earlier steps also booked; look only at the two overlapping bookings made here
+        const here = busy.filter((x) => x.start.getTime() === when.getTime() || x.start.getTime() === when.getTime() + 3600_000);
+        assertEquals(here.map((x) => x.chair).sort(), [1, 2]);
+        const up = (await repo.upcomingForClient(client.id, new Date())).find((x) => x.id === (a as { appointmentId: string }).appointmentId)!;
+        assertEquals([up.serviceId, up.choiceNames], [sid, ["Medium"]]);
       });
     } finally {
       // clean up (appointments block business deletion on purpose: on delete restrict)

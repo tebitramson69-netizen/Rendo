@@ -1,5 +1,5 @@
 // Tests for the built-in understanding of typed requests. Run from the repo root:  deno test supabase/functions/tests/
-import { deepStrictEqual as assertEquals, ok as assert } from "node:assert/strict";
+import { deepStrictEqual as assertEquals } from "node:assert/strict";
 import { type CatalogStyle, distance, understand } from "../_shared/understand.ts";
 
 // A realistic Douala salon catalogue
@@ -103,6 +103,8 @@ Deno.test("understand: 'vos mèches' from the CLIENT means the salon's hair (per
   assertEquals(u("knotless avec vos mèches").choiceIds, ["salon"]);
   assertEquals(u("knotless, j'apporte mes mèches").choiceIds, ["vos"]);
   assertEquals(u("knotless with salon hair").choiceIds, ["salon"]);
+  // both mentioned (often with a negation the bot can't read safely): ask, don't guess
+  assertEquals(u("knotless, je n'ai pas mes mèches, vous fournissez ?").choiceIds, []);
 });
 
 Deno.test("understand: sizes and lengths; ambiguity is left for the bot to ask", () => {
@@ -202,4 +204,21 @@ Deno.test("understand: small-typo tolerance never matches unrelated short words"
   assertEquals(u("bon box").styleId, "box"); // "bon" is not "box"
   assertEquals(u("bonne journée").styleCandidates, []);
   assertEquals(u("bonne journée").styleId, null);
+});
+
+Deno.test("understand: an owner's answer named 'Vos mèches, apportées au salon' still means the client's own hair", () => {
+  const knot: CatalogStyle = {
+    ...KNOTLESS,
+    groups: [{
+      id: "meches",
+      name: "Mèches",
+      nameEn: null,
+      choices: [
+        { id: "vos", name: "Vos mèches", nameEn: "Own hair, to the salon" },
+        { id: "salon", name: "Mèches du salon", nameEn: null },
+      ],
+    }],
+  };
+  assertEquals(u("knotless avec mes propres mèches", [knot]).choiceIds, ["vos"]);
+  assertEquals(u("knotless, vous fournissez les mèches ?", [knot]).choiceIds, ["salon"]);
 });

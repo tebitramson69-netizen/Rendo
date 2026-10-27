@@ -7,6 +7,7 @@ import {
   toBusiness,
   toClient,
   toConversation,
+  toGroups,
   toUpcoming,
 } from "../_shared/mappers.ts";
 
@@ -35,6 +36,7 @@ Deno.test("mappers: business row -> Business", () => {
     horizonDays: 10,
     minNoticeMinutes: 120,
     contactPhone: null,
+    chairs: 1, // not in the row (older data): defaults to one chair
   });
 });
 
@@ -119,5 +121,27 @@ Deno.test("mappers: upcoming appointment with embedded service", () => {
     services: { name: "Coupe" },
   });
   assertEquals(u.service, { name: "Coupe", nameEn: null, category: "", categoryEn: null });
+  assertEquals([u.serviceId, u.choiceNames], ["", []]);
   assertEquals(u.startsAt.toISOString(), "2026-11-02T08:00:00.000Z");
+});
+
+Deno.test("mappers: style questions are sorted; switched-off answers and empty questions are dropped", () => {
+  const g = toGroups([
+    {
+      id: "g2", name: "Mèches", name_en: "Hair", sort_order: 2,
+      service_choices: [
+        { id: "c3", name: "Du salon", name_en: null, price_add_xaf: 4000, duration_add_minutes: 0, sort_order: 2, active: true },
+        { id: "c4", name: "Vos mèches", name_en: null, price_add_xaf: 0, duration_add_minutes: 0, sort_order: 1, active: true },
+        { id: "c5", name: "Ancienne", name_en: null, price_add_xaf: 1, duration_add_minutes: 0, sort_order: 0, active: false },
+      ],
+    },
+    {
+      id: "g1", name: "Taille", name_en: null, sort_order: 1,
+      service_choices: [{ id: "c1", name: "Medium", name_en: null, price_add_xaf: 5000, duration_add_minutes: 60, sort_order: 1, active: true }],
+    },
+    { id: "g3", name: "Vide", name_en: null, sort_order: 3, service_choices: [{ id: "c6", name: "X", name_en: null, price_add_xaf: 0, duration_add_minutes: 0, sort_order: 1, active: false }] },
+  ]);
+  assertEquals(g.map((x) => [x.id, x.choices.map((c) => c.id)]), [["g1", ["c1"]], ["g2", ["c4", "c3"]]]);
+  assertEquals(g[0].choices[0], { id: "c1", name: "Medium", nameEn: null, priceAddXaf: 5000, durationAddMinutes: 60 });
+  assertEquals(toGroups(null), []);
 });

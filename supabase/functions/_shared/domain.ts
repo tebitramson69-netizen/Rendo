@@ -3,7 +3,7 @@
 // The bot's logic depends only on this interface, never on Supabase directly, so it can be tested
 // with an in-memory fake. The real implementation is supabase_repo.ts.
 // This file imports nothing that needs downloading (tests stay offline).
-import type { Interval, OpeningRange } from "./availability.ts";
+import type { BusyInterval, Interval, OpeningRange } from "./availability.ts";
 
 export type Lang = "fr" | "en";
 
@@ -19,6 +19,8 @@ export interface Business {
   minNoticeMinutes: number;
   /** Public number shown to clients who ask for a person (null = not set). Never owner_whatsapp. */
   contactPhone: string | null;
+  /** Clients served at the same time. */
+  chairs: number;
 }
 
 /** fixed: "3 000 FCFA" (or nothing if no price) | from: "dès 15 000 FCFA" | on_site: price confirmed on site */
@@ -32,14 +34,36 @@ export interface ServiceLabel {
   categoryEn: string | null;
 }
 
+/** One option of a style ("Medium"), adding to the price and the time. */
+export interface ServiceChoice {
+  id: string;
+  name: string;
+  nameEn: string | null;
+  priceAddXaf: number;
+  durationAddMinutes: number;
+}
+
+/** A question asked for a style ("Taille" -> Jumbo / Medium / Small). The client picks exactly one. */
+export interface ChoiceGroup {
+  id: string;
+  name: string;
+  nameEn: string | null;
+  choices: ServiceChoice[]; // active ones only, in display order
+}
+
 export interface Service extends ServiceLabel {
   id: string;
+  /** Base duration and price, before the client's choices. */
   durationMinutes: number;
   priceXaf: number | null;
   priceMode: PriceMode;
   /** Short note written by the business, shown before the client confirms ("Mèches non comprises."). */
   note: string | null;
   noteEn: string | null;
+  /** Words clients type for this style ("knotless", "sans noeuds"). */
+  aliases: string[];
+  /** Questions for this style, in display order (may be empty). */
+  groups: ChoiceGroup[];
 }
 
 export interface Client {
@@ -73,8 +97,8 @@ export interface Conversation {
 export interface AvailabilityData {
   openingHours: OpeningRange[];
   closures: Interval[];
-  /** Active appointments as [starts_at, blocked_until). */
-  busy: Interval[];
+  /** Active appointments as [starts_at, blocked_until), with their chair. */
+  busy: BusyInterval[];
 }
 
 export interface UpcomingAppointment {
@@ -82,10 +106,21 @@ export interface UpcomingAppointment {
   bookingCode: string;
   service: ServiceLabel;
   startsAt: Date;
+  serviceId: string;
+  /** Names of the options chosen at booking time (French), e.g. ["Medium", "Dos"]. */
+  choiceNames: string[];
 }
 
 export type BookResult =
-  | { status: "booked"; appointmentId: string; bookingCode: string; startsAt: Date; endsAt: Date }
+  | {
+    status: "booked";
+    appointmentId: string;
+    bookingCode: string;
+    startsAt: Date;
+    endsAt: Date;
+    /** Base price + chosen additions (null when the price is set on site). */
+    estimateXaf: number | null;
+  }
   | { status: "slot_taken" }
   | { status: "invalid"; reason: string };
 
@@ -117,7 +152,8 @@ export interface Repo {
   conversation(client: Client): Promise<Conversation>;
   /** "conflict" means another message saved in between: reload and handle the message again. */
   saveConversation(conversation: Conversation): Promise<"saved" | "conflict">;
-  book(businessId: string, clientId: string, serviceId: string, startsAt: Date): Promise<BookResult>;
+  /** Books the style with the client's choices (one per group). */
+  book(businessId: string, clientId: string, serviceId: string, startsAt: Date, choiceIds: string[]): Promise<BookResult>;
   /** The client's confirmed appointments that have not started yet, soonest first. */
   upcomingForClient(clientId: string, now: Date): Promise<UpcomingAppointment[]>;
   /** Cancels one of the client's own upcoming appointments. */

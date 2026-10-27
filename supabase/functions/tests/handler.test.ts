@@ -93,6 +93,7 @@ const BUSINESS: Business = {
   horizonDays: 10,
   minNoticeMinutes: 120,
   contactPhone: null,
+  chairs: 1,
 };
 
 /** Fake services that record what the handler did. */
