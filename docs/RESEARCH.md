@@ -172,3 +172,11 @@ Decisions:
   "not offered" reply now needs a question about a named thing); "combines" (autocorrect of "combien") is read
   as a price question.
 
+### M3.7b jumping between questions (27 Oct 2026, second phone test)
+Seen on the phone: "Vous fait qoui" was not understood; "C'est combien les box braids" on the summary restarted
+the booking at "quel jour ?" (the chosen 8h30 was lost); "Annuler" typed during a booking listed the client's
+older appointments instead of stopping the booking. Fixed: SMS spellings are normalised before reading; a side
+question (services, price of the same style) is answered and the current step is shown again; "Annuler" alone
+during a booking stops that booking. A test replays 400 random messages and taps in any order and checks that
+the bot always answers, respects WhatsApp limits, and never books a wrong or overlapping appointment.
+

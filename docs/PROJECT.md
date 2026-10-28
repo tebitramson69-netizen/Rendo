@@ -42,7 +42,7 @@ owner commands (M5).
 | Owner commands, onboarding, catalogue editing (M5) | **Not built** |
 | Real pilot salon (M6) | Not started |
 
-Tests: **117 Deno tests** + **8 SQL test files** + 1 integration test (real Postgres + PostgREST).
+Tests: **123 Deno tests** + **8 SQL test files** + 1 integration test (real Postgres + PostgREST).
 
 ---
 
@@ -72,7 +72,7 @@ Meta WhatsApp Cloud API ──POST (signed X-Hub-Signature-256)──►  Supaba
 
 **Why this shape**
 - `bot.ts` never touches the network or the database directly: it talks to a `Repo` interface.
-  Tests use `tests/fake_repo.ts`; production uses `SupabaseRepo`. This is what makes 117 fast tests possible.
+  Tests use `tests/fake_repo.ts`; production uses `SupabaseRepo`. This is what makes 123 fast tests possible.
 - Every button/list id carries the whole draft (`tm:<style>:<choices>:<startMs>`) and is **re-checked against
   fresh data**, so an old button tapped hours later can never book something wrong.
 - The database has the last word: two clients tapping the same time at the same second → one booking per chair,
@@ -171,7 +171,10 @@ A typed message can fill several steps at once; the bot asks **only what is miss
 | "déplacer mon rendez-vous" | Explains: cancel, then book a new time |
 | "parler à quelqu'un" | Owner alerted (max once per 6 h per client) + public number if set |
 | "EN" / "FR" | Switches language and stays on the same step; the choice is remembered |
-| Something not understood | Repeats the current step; after 3 in a row offers a person |
+| A side question in the middle of a booking ("vous faites quoi ?", "c'est combien les knotless ?" on the summary) | Answers it, then shows the **same step again** (the chosen day/time are kept) |
+| "Annuler" typed in the middle of a booking | Stops **that** booking ("rien n'a été réservé"); outside a booking it lists the appointments to cancel |
+| A new day/time or another style during a booking ("et demain ?", "plutôt box braids") | Moves the booking forward with the new information |
+| Something not understood | Says so with an example ("knotless samedi matin"), repeats the current step; after 3 in a row offers a person |
 
 ### 6.1 Prices and durations (decided 27 Oct 2026)
 - **Durations are never shown to clients** (no "≈ 5 h", no "Fin vers 14h30"). They are used internally so the
@@ -194,7 +197,9 @@ A typed message can fill several steps at once; the bot asks **only what is miss
 ### 6.3 Understanding (understand.ts)
 Deterministic, no AI yet: style names + owner aliases (typo-tolerant), answer meanings ("mes mèches" = the
 client's own hair, "longues" = Dos), French/English days ("samedi", "demain", "31/10"), times ("14h", "2pm"),
-parts of day, intents. It only recognises what exists in the catalogue. Designed so an AI extractor can be
+parts of day, intents. SMS spellings and common typos are fixed first ("vs fait koi" → "vous faites quoi",
+"cb" → "combien", "dmain" → "demain", "ajd" → "aujourd'hui"; list `SMS` in understand.ts — add new ones there
+with a test). It only recognises what exists in the catalogue. Designed so an AI extractor can be
 plugged in later behind the same interface (replies stay templated → prices/times still never invented).
 
 ---
@@ -220,7 +225,7 @@ plugged in later behind the same interface (replies stay templated → prices/ti
 
 | Task | Command / action |
 |---|---|
-| Run all Deno tests | `deno test supabase/functions/tests/` → expect `ok | 117 passed` |
+| Run all Deno tests | `deno test supabase/functions/tests/` → expect `ok | 123 passed` |
 | Apply new migrations | `supabase db push` then `supabase migration list` (Local = Remote) |
 | SQL tests | Supabase → SQL Editor → paste a whole `supabase/tests/*.sql` → Ctrl+A → Run → "… PASSED" |
 | Deploy the bot | `supabase functions deploy whatsapp-webhook --use-api` |
@@ -264,8 +269,10 @@ plugged in later behind the same interface (replies stay templated → prices/ti
 - One webhook serves one phone number (multi-salon routing by `phone_number_id` is in the schema but the
   secret holds a single id) — decide before the second salon.
 - Reschedule = cancel + rebook (no one-step move yet).
-- Understanding is keyword-based: heavy autocorrect ("same-day Martin" for "samedi matin") is missed; the bot
-  then simply asks. An AI extractor is the planned improvement.
+- Understanding is keyword-based: it handles SMS spellings and side questions, but not every sentence a person
+  can write (heavy autocorrect such as "same-day Martin" for "samedi matin" is missed; the bot then asks).
+  Planned: an AI extractor used **only** for messages the built-in reader doesn't understand (cost, privacy
+  notice and Meta's AI rules to check first).
 - Demo prices are placeholders; need 1–2 real salon price boards and 3 salon interviews.
 - Old token to revoke; stray Netlify project to delete.
 

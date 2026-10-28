@@ -87,6 +87,31 @@ export function normalize(input: string): string {
 
 const tokens = (s: string) => (s ? s.split(" ") : []);
 
+// SMS spellings and common typos seen in Cameroonian WhatsApp messages -> the plain word.
+// Only whole words are replaced, and only in what the CLIENT wrote (never in catalogue names).
+const SMS: Record<string, string> = {
+  koi: "quoi", kwa: "quoi", qoi: "quoi", qoui: "quoi", quoa: "quoi", quio: "quoi", kois: "quoi",
+  vs: "vous", vou: "vous",
+  fai: "faites", fais: "faites", fait: "faites", faite: "faites", faits: "faites", faitent: "faites",
+  kel: "quel", kels: "quels", kell: "quelle", kelle: "quelle", kelles: "quelles",
+  cb: "combien", cbn: "combien", combie: "combien", combin: "combien", combine: "combien", combines: "combien",
+  combiens: "combien", conbien: "combien", conbient: "combien", combient: "combien",
+  pr: "pour", pk: "pourquoi", svp: "svp", stp: "svp",
+  dmain: "demain", demin: "demain", dmn: "demain", deman: "demain", demaim: "demain",
+  ajd: "aujourd hui", auj: "aujourd hui", ojd: "aujourd hui", aujourdhui: "aujourd hui",
+  bsr: "bonsoir", bjr: "bonjour", bnjr: "bonjour", slt: "salut", mrc: "merci", mci: "merci",
+  rdz: "rdv", rv: "rdv", rendevous: "rendez vous", rendezvous: "rendez vous",
+  anuler: "annuler", anule: "annuler", annule: "annuler", annulle: "annuler",
+  pls: "please", plz: "please", hw: "how", u: "you", ur: "your", wat: "what", wht: "what", wot: "what",
+  tmr: "tomorrow", tmrw: "tomorrow", tomoro: "tomorrow", tomorow: "tomorrow", tommorow: "tomorrow",
+  "2day": "today", "2moro": "tomorrow", "2main": "demain",
+};
+
+/** normalize() + SMS spellings fixed: "vs fait koi" -> "vous faites quoi". */
+export function normalizeClient(input: string): string {
+  return tokens(normalize(input)).map((w) => SMS[w] ?? w).join(" ");
+}
+
 /** Levenshtein distance, stopped early when it exceeds `max`. */
 export function distance(a: string, b: string, max = 2): number {
   if (Math.abs(a.length - b.length) > max) return max + 1;
@@ -498,7 +523,7 @@ function scoreStyles(catalog: CatalogStyle[], words: string[]): { best: StyleSco
 
 // Words that carry no request content (used to decide "asked for something we don't offer")
 const FILLER = new Set([
-  ..."bonjour bonsoir salut hello hi hey svp sil vous plait please merci thanks thank je j tu vous nous on il elle c est ce cette ces le la les l un une des de du d a au aux en et ou mais pour avec sans sur dans par pas ne n que qu qui quoi quel quelle quels quelles combien prix tarif tarifs cout coute how much price cost is the a an of for with my your i you we can could would like want voudrais veux voulais peux pourrais faire fais do does did passer venir come book rdv rendez appointment reserver disponible dispo libre available free demain aujourd hui today tomorrow matin soir apres midi morning afternoon evening samedi dimanche lundi mardi mercredi jeudi vendredi saturday sunday monday tuesday wednesday thursday friday h heure heures am pm svp stp please ok oui yes non no there here what when where moi me mon ma mes propres meches meche own hair bring apporte coiffure coiffer hairstyle style service services prestation prestations faites faire fait offrez proposez offer have avez as cher comme genre type quoi aimerais souhaite souhaiterais besoin voir savoir chez salon ici combines combie pas encore aussi also too still just juste svp"
+  ..."bonjour bonsoir salut hello hi hey svp sil vous plait please merci thanks thank je j tu vous nous on il elle c est ce cette ces le la les l un une des de du d a au aux en et ou mais pour avec sans sur dans par pas ne n que qu qui quoi quel quelle quels quelles combien prix tarif tarifs cout coute how much price cost is the a an of for with my your i you we can could would like want voudrais veux voulais peux pourrais faire fais do does did passer venir come book rdv rendez appointment reserver disponible dispo libre available free demain aujourd hui today tomorrow matin soir apres midi morning afternoon evening samedi dimanche lundi mardi mercredi jeudi vendredi saturday sunday monday tuesday wednesday thursday friday h heure heures am pm svp stp please ok oui yes non no there here what when where moi me mon ma mes propres meches meche own hair bring apporte coiffure coiffer hairstyle style service services prestation prestations faites faire fait offrez proposez offer have avez as cher comme genre type quoi aimerais souhaite souhaiterais besoin voir savoir chez salon ici combines combie vos votre nos notre leur leurs sont est etes suis ont bien bon bonne pas encore aussi also too still just juste svp"
     .split(" "),
 ]);
 
@@ -506,7 +531,7 @@ const FILLER = new Set([
 // Main
 // ---------------------------------------------------------------------------
 export function understand(raw: string, catalog: CatalogStyle[], now: Date, timeZone: string): Understanding {
-  const text = normalize(raw);
+  const text = normalizeClient(raw);
   const words = tokens(text);
   const result: Understanding = {
     intent: "unknown",

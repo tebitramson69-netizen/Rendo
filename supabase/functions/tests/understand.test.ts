@@ -222,3 +222,15 @@ Deno.test("understand: an owner's answer named 'Vos mèches, apportées au salon
   assertEquals(u("knotless avec mes propres mèches", [knot]).choiceIds, ["vos"]);
   assertEquals(u("knotless, vous fournissez les mèches ?", [knot]).choiceIds, ["salon"]);
 });
+
+Deno.test("understand: SMS spellings and typos used on WhatsApp", () => {
+  assertEquals(u("Vous fait qoui").intent, "services");
+  assertEquals(u("vs faites koi").intent, "services");
+  assertEquals(u("kel sont vos services").intent, "services");
+  assertEquals([u("cb les knotless").intent, u("cb les knotless").styleId], ["price", "knotless"]);
+  assertEquals(u("c koi vos prix").noMatch, false);
+  assertEquals(u("knotless dmain matin").day, "2026-10-26");
+  assertEquals(u("hw much 4 box braids tmr").asksPrice, true);
+  assertEquals(u("je peux venir ajd a 14h").time, "14:00");
+  assertEquals(u("anuler").intent, "mine");
+});

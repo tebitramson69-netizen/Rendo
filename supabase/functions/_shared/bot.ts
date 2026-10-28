@@ -45,7 +45,7 @@ import {
   whenLabel,
 } from "./i18n.ts";
 import { type Button, buttons, list, type ListRow, type Outbound, type OwnerAlert, text } from "./outbound.ts";
-import { type CatalogStyle, normalize as normalizeText, type PartOfDay, understand } from "./understand.ts";
+import { type CatalogStyle, normalize as normalizeText, normalizeClient, type PartOfDay, understand } from "./understand.ts";
 import { firstName } from "./whatsapp.ts";
 
 export const FLOW_TTL_MS = 2 * 60 * 60 * 1000; // an unfinished flow is forgotten after 2 h
@@ -278,6 +278,10 @@ function toCatalog(services: Service[]): CatalogStyle[] {
 }
 
 const PARTS: Record<PartOfDay, [number, number]> = { morning: [0, 12], afternoon: [12, 17], evening: [17, 24] };
+/** Steps of a booking in progress (a side question there is answered, then the booking continues). */
+const BOOKING_STEPS = ["options", "days", "times", "confirm"];
+/** "Annuler" alone while booking = stop this booking (not: cancel an appointment already confirmed). */
+const STOP_BOOKING = /^(annuler|cancel|arreter|arrete|laisse tomber|laissez tomber|j annuler|je annuler|non merci)$/;
 
 // ---------------------------------------------------------------------------
 // The conversation
@@ -711,7 +715,14 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     return sid ? await draftFrom({ sid, choices: ch === "-" ? [] : ch.split(".") }) : null;
   };
 
-  /** Shows the current step again (after an unrecognised message, or a language switch). */
+  /** Day / part / time the client typed earlier in this booking ("samedi matin"). */
+  const rememberedWhen = (): When => ({
+    day: typeof conv.context.day === "string" ? conv.context.day : null,
+    part: typeof conv.context.part === "string" ? conv.context.part as PartOfDay : null,
+    time: typeof conv.context.time === "string" ? conv.context.time : null,
+  });
+
+  /** Shows the current step again (after an unrecognised message, a side question, or a language switch). */
   const repeatScreen = async (prefix: string[] = []) => {
     const d = expired ? null : await savedDraft();
     switch (conv.state as Screen) {
@@ -723,10 +734,13 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
         return styles.length > 1 ? styleList(styles, t().chooseStyle, prefix) : services(prefix);
       }
       case "options":
+        return d ? proceed(d, rememberedWhen(), prefix) : services(prefix);
       case "days":
         return d ? proceed(d, {}, prefix) : services(prefix);
-      case "times":
-      case "confirm": {
+      case "confirm":
+        if (d && typeof conv.context.start === "number") return confirm(d, conv.context.start, prefix);
+        // falls through
+      case "times": {
         const date = typeof conv.context.date === "string"
           ? conv.context.date
           : typeof conv.context.start === "number"
@@ -761,6 +775,10 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
       lang = u.language;
     }
     if (u.asksPrice || u.intent === "price") pricesAsked = true;
+    const inBooking = !expired && BOOKING_STEPS.includes(conv.state);
+
+    // "Annuler" typed in the middle of a booking: stop this booking (nothing was booked yet)
+    if (inBooking && STOP_BOOKING.test(normalizeClient(raw))) return menu(false, [t().flowStopped]);
 
     switch (u.intent) {
       case "lang_fr":
@@ -787,13 +805,30 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
     // "vous faites quoi ?": say what the salon does, in one sentence, then let the client say what she wants
     if (u.intent === "services") {
       if (u.asksPrice && !neverPrices) return services([...greet, t().priceListIntro]);
+      if (inBooking) { // a side question: answer it, then continue the booking where it was
+        const offer = await offerSentence();
+        return repeatScreen(offer ? [offer] : []);
+      }
       return menu(conv.isNew || expired, [], t().askWhich);
     }
 
     // 1. a precise style: answer with its price, then ask only what is missing
     if (u.styleId) {
       const service = all.find((s) => s.id === u.styleId)!;
-      const previous = await savedDraft();
+      const previous = expired ? null : await savedDraft();
+      // same style as the booking in progress and nothing new ("c'est combien les box braids ?" on the
+      // summary): answer, then stay on the current step instead of starting the booking again
+      if (
+        inBooking && previous && previous.service.id === service.id && u.choiceIds.length === 0 &&
+        !u.day && !u.time && !u.partOfDay
+      ) {
+        const side: string[] = [];
+        if (u.asksPrice || u.intent === "price") {
+          if (neverPrices) side.push(t().priceNever);
+          else side.push(t().priceIntro(draftName(previous), priceShortOf(previous, undefined, nextGroup(previous) !== null)));
+        }
+        return repeatScreen(side);
+      }
       const keep = previous && previous.service.id === service.id ? draftIds(previous).choices : [];
       const merged = [...keep];
       for (const c of u.choiceIds) {
@@ -871,13 +906,7 @@ export async function runBot(input: BotInput, repo: Repo): Promise<BotResult> {
         if (c.kind === "style") {
           // an option tapped: continue with the day/time the client had already typed, if any
           const sameDraft = !expired && conv.context.sid === d.service.id;
-          const remembered: When = sameDraft
-            ? {
-              day: typeof conv.context.day === "string" ? conv.context.day : null,
-              part: typeof conv.context.part === "string" ? conv.context.part as PartOfDay : null,
-              time: typeof conv.context.time === "string" ? conv.context.time : null,
-            }
-            : {};
+          const remembered: When = sameDraft ? rememberedWhen() : {};
           return proceed(d, remembered);
         }
         if (nextGroup(d)) return proceed(d, {}); // a question is unanswered (catalogue changed)

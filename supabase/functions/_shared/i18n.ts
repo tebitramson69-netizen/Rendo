@@ -186,6 +186,7 @@ export interface Texts {
   moreServices: string;
   moreServicesDesc: string;
   didNotUnderstand: string;
+  flowStopped: string;
   offerHuman: string;
   menuFooter: string;
   btnBook: string;
@@ -278,7 +279,8 @@ export const TEXTS: Record<Lang, Texts> = {
     reschedulePrefix: "Pour changer la date : choisissez le rendez-vous, annulez-le, puis prenez un nouveau créneau.",
     moreServices: "Plus de prestations…",
     moreServicesDesc: "Voir la suite de la liste",
-    didNotUnderstand: "Je n'ai pas compris 🙂 Merci d'utiliser les boutons ci-dessous.",
+    didNotUnderstand: "Je n'ai pas bien compris 🙂 Écrivez par exemple « knotless samedi matin », ou utilisez les boutons.",
+    flowStopped: "D'accord, j'arrête cette réservation : rien n'a été réservé 👍",
     offerHuman: "Vous pouvez aussi appuyer sur « Parler à quelqu'un ».",
     menuFooter: "Reply EN for English",
     btnBook: "Prendre rendez-vous",
@@ -360,7 +362,8 @@ export const TEXTS: Record<Lang, Texts> = {
     reschedulePrefix: "To change the date: choose the appointment, cancel it, then pick a new slot.",
     moreServices: "More services…",
     moreServicesDesc: "See the rest of the list",
-    didNotUnderstand: "Sorry, I didn't understand 🙂 Please use the buttons below.",
+    didNotUnderstand: "Sorry, I didn't quite understand 🙂 Write for example “knotless Saturday morning”, or use the buttons.",
+    flowStopped: "OK, I've stopped this booking: nothing was booked 👍",
     offerHuman: "You can also tap “Talk to someone”.",
     menuFooter: "Écrivez FR pour le français",
     btnBook: "Book appointment",

@@ -426,3 +426,96 @@ Deno.test("talk: once the client asked the price, the next questions of the same
   r = await send(s.repo, c, say("knotless"), new Date(NOW.getTime() + 3 * 3600_000));
   assert(!FCFA.test(last(r).body), last(r).body);
 });
+
+// ---------------------------------------------------------------------------
+// Jumping from one question to another (phone test of 27 Oct 2026, replayed)
+// ---------------------------------------------------------------------------
+Deno.test("jumps: on the summary, 'Vous fait qoui' and 'C'est combien les knotless' are answered, then the summary comes back", async () => {
+  const s = salon();
+  const c = await client(s.repo);
+  const start = at("2026-10-28 08:30").getTime();
+  let r = await send(s.repo, c, tap(ids.time(D(s.knotless.id, [s.jumbo.id, s.epaules.id, s.vos.id]), start)));
+  assertEquals(r.conversation.state, "confirm");
+
+  r = await send(s.repo, c, say("Vous fait qoui")); // SMS spelling of "vous faites quoi"
+  assert(last(r).body.startsWith("Chez nous : tresses (knotless, box braids), coupe et conseil beauté.\n\nRécapitulatif :"), last(r).body);
+  assertEquals([r.conversation.state, r.conversation.context.start], ["confirm", start]);
+
+  r = await send(s.repo, c, say("C'est combien les knotless"));
+  assert(
+    last(r).body.startsWith("Tresses – Knotless (Jumbo, Épaules, Vos mèches) : dès 15 000 FCFA.\n\nRécapitulatif :"),
+    last(r).body,
+  );
+  assertEquals([r.conversation.state, r.conversation.context.start], ["confirm", start]); // the 8h30 choice is kept
+  assertEquals(btns(last(r)).map((b) => b.title), ["Confirmer", "Changer l'heure", "Annuler"]);
+  assertEquals(s.repo.appointments.length, 0);
+});
+
+Deno.test("jumps: 'Annuler' typed during a booking stops THAT booking; outside a booking it shows the appointments", async () => {
+  const s = salon();
+  const c = await client(s.repo);
+  await send(s.repo, c, tap(ids.confirm(D(s.coupe.id), at("2026-10-27 09:00").getTime()))); // one real appointment
+  let r = await send(s.repo, c, tap(ids.style(D(s.knotless.id)))); // a new booking in progress
+  assertEquals(r.conversation.state, "options");
+  r = await send(s.repo, c, say("Annuler"));
+  assert(last(r).body.startsWith("D'accord, j'arrête cette réservation : rien n'a été réservé 👍"), last(r).body);
+  assertEquals(r.conversation.state, "menu");
+  assertEquals(r.alerts, []);
+  assertEquals(s.repo.appointments.filter((a) => a.status === "confirmed").length, 1); // the real one is untouched
+  r = await send(s.repo, c, say("anuler"));
+  assert(last(r).body.startsWith("Vos prochains rendez-vous"), last(r).body);
+});
+
+Deno.test("jumps: a question about another style, or a new day, during a booking moves the booking forward", async () => {
+  const s = salon();
+  const c = await client(s.repo);
+  let r = await send(s.repo, c, tap(ids.day(D(s.knotless.id, [s.jumbo.id, s.epaules.id, s.vos.id]), "2026-10-28")));
+  assertEquals(r.conversation.state, "times");
+  r = await send(s.repo, c, say("et dmain matin ?")); // SMS "demain"
+  assert(last(r).body.endsWith("– Demain : à quelle heure ?"), last(r).body); // Monday 26 = tomorrow, morning only
+  assertEquals(rowsOf(last(r)).map((x) => x.title).at(-1), "11h30");
+  r = await send(s.repo, c, say("vs faites les box braids ?"));
+  assert(last(r).body.startsWith("Tresses – Box braids"), last(r).body);
+});
+
+Deno.test("jumps: a message not understood in the middle of the questions keeps the day already given", async () => {
+  const s = salon();
+  const c = await client(s.repo);
+  let r = await send(s.repo, c, say("knotless samedi matin"));
+  r = await send(s.repo, c, say("euh je sais pas trop"));
+  assert(last(r).body.endsWith("Tresses – Knotless — choisissez : Taille"), last(r).body);
+  for (let i = 0; i < 3; i++) r = await send(s.repo, c, tap(btns(last(r))[0].id)); // Jumbo, Épaules, Vos mèches
+  assertEquals(last(r).body, "Tresses – Knotless (Jumbo, Épaules, Vos mèches) – Sam. 31 oct. : à quelle heure ?");
+});
+
+Deno.test("jumps: 400 random messages and taps in any order — always an answer, never a crash, never a wrong booking", async () => {
+  const s = salon();
+  const c = await client(s.repo);
+  const typed = [
+    "bonjour", "Vous fait qoui", "c'est combien les knotless", "knotless samedi matin", "box braids dmain",
+    "Annuler", "anuler", "mes rendez-vous", "EN", "FR", "merci", "euh", "vs faites les vanilles ?", "14h",
+    "knotless small dos avec mes mèches samedi à 10h", "parler à quelqu'un", "c koi vos prix", "tresses", "ok",
+  ];
+  let seed = 7;
+  const rnd = (n: number) => (seed = (seed * 1103515245 + 12345) % 2147483648) % n;
+  let now = NOW.getTime();
+  let last: BotResult | null = null;
+  for (let i = 0; i < 400; i++) {
+    now += rnd(4) === 0 ? 3 * 3600_000 : 60_000;
+    const options = last ? last.replies.flatMap((m) => [...btns(m).map((b) => b.id), ...rowsOf(m).map((x) => x.id)]) : [];
+    const event = options.length && rnd(3) > 0 ? tap(options[rnd(options.length)]) : say(typed[rnd(typed.length)]);
+    last = await send(s.repo, c, event, new Date(now)); // send() also checks every WhatsApp limit
+    assert(last.replies.length >= 1, `no reply at step ${i}`);
+  }
+  // every booking made is valid: one answer per question, and no two bookings overlap on one chair
+  for (const a of s.repo.appointments) {
+    const svcOf = s.repo.services.find((x) => x.id === a.serviceId)!;
+    assertEquals(a.choiceIds.length, svcOf.groups.length);
+  }
+  const live = s.repo.appointments.filter((a) => a.status === "confirmed");
+  for (const a of live) {
+    for (const b of live) {
+      if (a !== b && a.chair === b.chair) assert(a.blockedUntil <= b.start || b.blockedUntil <= a.start, "overlap on a chair");
+    }
+  }
+});

@@ -317,7 +317,7 @@ Deno.test("bot: unknown text inside a step repeats the step; the 3rd time offers
   await send(repo, c, tap(ids.service(coupe.id)));
   let r = await send(repo, c, say("euh je sais pas trop"));
   assertEquals(r.replies.length, 2);
-  assert(bodyOf(r.replies[0]).startsWith("Je n'ai pas compris"));
+  assert(bodyOf(r.replies[0]).startsWith("Je n'ai pas bien compris"));
   assertEquals(r.conversation.state, "days"); // same step shown again
   r = await send(repo, c, say("??"));
   assert(!bodyOf(r.replies[0]).includes("Parler à quelqu'un"));
